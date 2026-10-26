@@ -28,18 +28,26 @@ class Generator:
         self.client = OpenAI(base_url=config.LLM_BASE_URL, api_key=key)
         self.model = model
 
-    def answer(self, question: str, hits: list[Hit]) -> str:
+    def _call(self, messages, thinking: bool):
         resp = self.client.chat.completions.create(
             model=self.model,
             temperature=0.1,
-            max_tokens=3000,  # reasoning models spend part of this on hidden thinking
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": f"Context:\n{build_context(hits)}\n\nQuestion: {question}"},
-            ],
+            max_tokens=config.LLM_MAX_TOKENS if thinking else 1000,
+            messages=messages,
+            extra_body={"chat_template_kwargs": {"enable_thinking": thinking}},
         )
-        content = (resp.choices[0].message.content or "").strip()
+        return resp.choices[0]
+
+    def answer(self, question: str, hits: list[Hit]) -> str:
+        messages = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": f"Context:\n{build_context(hits)}\n\nQuestion: {question}"},
+        ]
+        choice = self._call(messages, config.LLM_THINKING)
+        if not choice.message.content and config.LLM_THINKING:
+            # reasoning used the whole budget; retry once without hidden thinking
+            choice = self._call(messages, thinking=False)
+        content = (choice.message.content or "").strip()
         if not content:
-            raise RuntimeError(f"{self.model} returned no answer (finish_reason="
-                               f"{resp.choices[0].finish_reason}); try a larger max_tokens.")
+            raise RuntimeError(f"{self.model} returned no answer (finish_reason={choice.finish_reason})")
         return content

@@ -16,3 +16,8 @@ CHUNK_OVERLAP = 75
 LLM_BASE_URL = "https://integrate.api.nvidia.com/v1"
 LLM_MODEL = os.getenv("NVIDIA_MODEL", "nvidia/nemotron-3.5-lightning-30b-a3b")
 TOP_K = 5
+# Thinking on gives better grounded answers and keeps [n] citations (eval showed
+# thinking-off answers dropped citations and misread context). Reasoning can still
+# exhaust the budget, so the generator falls back to thinking-off once if needed.
+LLM_THINKING = os.getenv("LLM_THINKING", "1") == "1"
+LLM_MAX_TOKENS = 8000
