@@ -1,0 +1,5 @@
+pypdf>=4.2
+sentence-transformers>=3.0
+chromadb>=0.5
+tiktoken>=0.7
+tqdm>=4.66
