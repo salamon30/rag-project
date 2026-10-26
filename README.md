@@ -15,8 +15,14 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
+## Data
+The corpus is 10 open-access arXiv papers on medical AI and RAG:
+```bash
+./scripts/download_data.sh
+```
+
 ## Ingest
-Put PDFs in `data/`, then:
+Put PDFs in `data/` (or use the script above), then:
 ```bash
 python -m ingest.run            # incremental
 python -m ingest.run --reset    # rebuild the collection from scratch
