@@ -6,7 +6,7 @@ Retrieval-Augmented Generation over a local PDF collection.
 - **A. Ingestion** (`ingest/`): PDF loading, ~500-token chunking with overlap, `BAAI/bge-small-en-v1.5` embeddings (512-token window), local ChromaDB. ✅
 - **B. Retrieval + generation** (`rag/`): top-k cosine retrieval, grounded answers with `[n]` citations via NVIDIA NIM (`nemotron-3.5-lightning-30b-a3b`); refuses when the context lacks the answer. ✅
 - **C. Evaluation** (`eval/`): 20-question test set grounded in the papers; retrieval hit@k / MRR and LLM-as-judge faithfulness + correctness. ✅
-- **UI** (`app/`): planned
+- **UI** (`app/`): Streamlit app with example questions, adjustable k, expandable cited sources and the latest eval scores. ✅
 
 ## Setup
 ```bash
@@ -45,3 +45,8 @@ python -m eval.run_eval          # writes eval/report.md and eval/results.csv
 - **Faithfulness / correctness (1-5)**: LLM judge checks the answer against the retrieved context and against a reference answer. Refusals on these answerable questions are scored correctness 1 by rule.
 
 Lessons from building it: with the reasoning model's thinking off, answers dropped citations and misread context, so the generator keeps thinking on (with a no-thinking fallback when the token budget runs out). The judge runs with thinking off, because otherwise it spent its whole budget reasoning and returned no score.
+
+## UI
+```bash
+streamlit run app/streamlit_app.py   # http://localhost:8501
+```
