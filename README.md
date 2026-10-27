@@ -1,52 +1,114 @@
-# RAG Project
+# Medical AI Paper QA: an evaluated RAG pipeline
 
-Retrieval-Augmented Generation over a local PDF collection.
+Ask questions about medical-AI research papers and get answers that cite the exact passage and page they came from. The system says *"I don't know"* instead of guessing when the retrieved text does not contain the answer.
 
-## Stages
-- **A. Ingestion** (`ingest/`): PDF loading, ~500-token chunking with overlap, `BAAI/bge-small-en-v1.5` embeddings (512-token window), local ChromaDB. ✅
-- **B. Retrieval + generation** (`rag/`): top-k cosine retrieval, grounded answers with `[n]` citations via NVIDIA NIM (`nemotron-3.5-lightning-30b-a3b`); refuses when the context lacks the answer. ✅
-- **C. Evaluation** (`eval/`): 20-question test set grounded in the papers; retrieval hit@k / MRR and LLM-as-judge faithfulness + correctness. ✅
-- **UI** (`app/`): Streamlit app with example questions, adjustable k, expandable cited sources and the latest eval scores. ✅
+Built end to end in Python: PDF ingestion, vector search, grounded generation, a measured evaluation suite and a web UI.
 
-## Setup
+![Streamlit UI answering a question with cited sources](docs/screenshot.png)
+
+## Highlights
+
+- **Grounded answers with citations.** Every claim is tied to a numbered passage `[n]`, shown with file, page and similarity score.
+- **Measured, not assumed.** A 20-question test set built from the papers scores retrieval (hit@k, MRR) and answers (LLM-as-judge faithfulness and correctness).
+- **Refuses instead of hallucinating.** When retrieval misses, the model declines. Faithfulness stays at 4.8 / 5 even on misses.
+- **Debugged with data.** Several design choices below were changed because the evaluation exposed a problem.
+
+## Results
+
+20 questions over 10 papers, k = 5 ([full report](eval/report.md), [per-question CSV](eval/results.csv)).
+
+| Metric | Score |
+|---|---|
+| Retrieval hit@1 | 0.70 |
+| Retrieval hit@5 | 0.95 |
+| MRR@10 | 0.81 |
+| Answers with citations | 94% |
+| Faithfulness (1-5, LLM judge) | 4.80 |
+| Correctness (1-5, LLM judge) | 4.00 |
+
+**What the misses show.** All four refusals are retrieval misses, not generation errors. The main pattern: the RAG *survey* paper quotes the original RAG paper, so its chunks outrank the original for questions about it. The one unfaithful answer came from the same confusion. A reranker or hybrid BM25 search is the next experiment, and this table is the baseline to beat.
+
+## Architecture
+
+```mermaid
+flowchart LR
+    subgraph Ingestion
+        A[PDFs] --> B[Page text<br/>pypdf]
+        B --> C[~500-token chunks<br/>75 overlap, per page]
+        C --> D[Embeddings<br/>bge-small-en-v1.5]
+        D --> E[(ChromaDB<br/>cosine)]
+    end
+    subgraph Query
+        Q[Question] --> QE[Query embedding]
+        QE --> E
+        E --> K[Top-k chunks<br/>+ source, page]
+        K --> L[LLM<br/>NVIDIA NIM]
+        L --> R[Answer with citations<br/>or refusal]
+    end
+    subgraph Evaluation
+        T[Test set<br/>20 Q + references] --> M[hit@k, MRR]
+        R --> J[LLM judge<br/>faithfulness, correctness]
+    end
+```
+
+| Component | Choice |
+|---|---|
+| PDF parsing | `pypdf`, page by page so citations keep exact page numbers |
+| Chunking | ~500 tokens, 75 overlap, counted with the embedding model's own tokenizer |
+| Embeddings | `BAAI/bge-small-en-v1.5` (384-dim, 512-token window, runs locally) |
+| Vector store | ChromaDB, persistent, cosine distance, deterministic chunk IDs for idempotent re-ingestion |
+| LLM | `nvidia/nemotron-3.5-lightning-30b-a3b` via NVIDIA NIM's OpenAI-compatible API |
+| UI | Streamlit, with shareable `?q=` question links |
+
+## Engineering decisions and lessons
+
+These came from measuring, not from the first draft.
+
+1. **Embedding window vs. chunk size.** The first embedding model, `all-MiniLM-L6-v2`, reads only 256 tokens, so half of every 500-token chunk was invisible to search. Switching to `bge-small-en-v1.5` with a 512-token window fixed this without shrinking chunks.
+2. **Reasoning on for the generator.** With the model's hidden reasoning turned off, answers dropped citations entirely and misread passages with confidence. Reasoning stays on, with a no-reasoning fallback if the token budget runs out.
+3. **Reasoning off for the judge.** With reasoning on, the judge spent its whole budget thinking and returned no score for 7 of 20 questions. Scoring is a short rubric task, so the judge runs without it.
+4. **Do not trust the judge blindly.** The judge rated an *"I don't know"* answer as fully correct. Since every test question is answerable, refusals are now scored correctness 1 by rule. A refusal detector that was too broad also flagged a correct answer containing "does not include zero"; it now requires a refusal phrase and no citations.
+5. **Errors must not lose the run.** A single failed API call used to abort the whole evaluation. Each question is now isolated and failures are reported as unscored.
+
+## Quickstart
+
+Requires Python 3.11 and an [NVIDIA NIM API key](https://build.nvidia.com/).
+
 ```bash
-python3.11 -m venv .venv
-source .venv/bin/activate
+git clone https://github.com/salamon30/rag-project.git && cd rag-project
+python3.11 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
+cp .env.example .env               # then set NVIDIA_API_KEY
+
+./scripts/download_data.sh         # 10 open-access arXiv papers into data/
+python -m ingest.run --reset       # build the vector store
 ```
 
-## Data
-The corpus is 10 open-access arXiv papers on medical AI and RAG:
+Then use any of the three entry points:
+
 ```bash
-./scripts/download_data.sh
+streamlit run app/streamlit_app.py                         # web UI at localhost:8501
+python -m rag.ask "What is the MIRAGE benchmark?"          # command line
+python -m eval.run_eval                                    # rerun the evaluation (~15 min)
 ```
 
-## Ingest
-Put PDFs in `data/` (or use the script above), then:
-```bash
-python -m ingest.run            # incremental
-python -m ingest.run --reset    # rebuild the collection from scratch
-```
-Chunks are stored in `chroma_db/` (collection `documents`) with `source` and `page` metadata.
+## Project structure
 
-## Ask
-Copy `.env.example` to `.env` and set `NVIDIA_API_KEY`, then:
-```bash
-python -m rag.ask "How did Med-PaLM 2 perform on MedQA?"
-python -m rag.ask "What is MedSAM?" --k 8 --show-context
+```
+ingest/    load PDFs, chunk, embed, store (Stage A)
+rag/       retriever, generator with citation rules, pipeline, CLI (Stage B)
+eval/      test set, metrics, LLM judge, report.md + results.csv (Stage C)
+app/       Streamlit UI
+scripts/   corpus download
 ```
 
-## Evaluate
-```bash
-python -m eval.run_eval          # writes eval/report.md and eval/results.csv
-```
-- **hit@k**: the expected source file is among the top-k retrieved chunks. **page_hit@k** also requires an expected page.
-- **MRR@10**: mean of 1/rank of the first chunk from the expected file.
-- **Faithfulness / correctness (1-5)**: LLM judge checks the answer against the retrieved context and against a reference answer. Refusals on these answerable questions are scored correctness 1 by rule.
+## Corpus
 
-Lessons from building it: with the reasoning model's thinking off, answers dropped citations and misread context, so the generator keeps thinking on (with a no-thinking fallback when the token budget runs out). The judge runs with thinking off, because otherwise it spent its whole budget reasoning and returned no score.
+Ten open-access arXiv papers on medical AI and RAG: the original RAG paper, a RAG survey, MedRAG, Med-PaLM and Med-PaLM 2, GPT-4 on medical exams, Medprompt, MedSAM, CheXNet and U-Net. The PDFs are not redistributed here; `scripts/download_data.sh` fetches them from arXiv.
 
-## UI
-```bash
-streamlit run app/streamlit_app.py   # http://localhost:8501
-```
+## Limitations and next steps
+
+- **Same model as generator and judge.** This can inflate answer scores through self-preference. A different judge model would be more reliable.
+- **Small test set.** 20 questions give a useful signal but wide error bars; answers also vary slightly between runs.
+- **Retrieval is the bottleneck.** Next: a cross-encoder reranker and hybrid BM25 + dense search, measured against the baseline above.
+- **Per-page chunking** keeps citations exact but splits passages that cross page boundaries.

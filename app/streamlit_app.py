@@ -58,6 +58,10 @@ for col, ex in zip(cols, examples):
     if col.button(ex, use_container_width=True):
         st.session_state.question = ex
 
+# ?q=... in the URL pre-fills and runs a question (shareable links)
+if "question" not in st.session_state and st.query_params.get("q"):
+    st.session_state.question = st.query_params["q"]
+
 question = st.text_input("Your question", key="question",
                          placeholder="e.g. What is the MIRAGE benchmark?")
 
