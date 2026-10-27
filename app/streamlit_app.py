@@ -36,6 +36,7 @@ with st.sidebar:
     show_text = st.toggle("Show retrieved text", value=True)
     st.divider()
     st.caption(f"Embeddings: `{config.EMBED_MODEL}`")
+    st.caption(f"Reranker: `{config.RERANK_MODEL}`")
     st.caption(f"LLM: `{config.LLM_MODEL}`")
     summary = eval_summary()
     if summary:
@@ -79,7 +80,11 @@ if question:
 
     st.subheader("Sources")
     for i, h in enumerate(result.hits, start=1):
-        label = f"[{i}] {h.source} · page {h.page} · similarity {h.score:.3f}"
+        if h.vector_rank is not None and h.score != h.vector_score:
+            label = (f"[{i}] {h.source} · page {h.page} · relevance {h.score:.2f}"
+                     f" · vector rank {h.vector_rank}")
+        else:
+            label = f"[{i}] {h.source} · page {h.page} · similarity {h.score:.3f}"
         if show_text:
             with st.expander(label):
                 st.text(h.text)

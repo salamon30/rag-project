@@ -35,9 +35,31 @@ def with_retry(fn, tries=3):
             time.sleep(5 * (i + 1))
 
 
-def evaluate(k: int):
-    tests = [json.loads(l) for l in (EVAL_DIR / "testset.jsonl").read_text().splitlines() if l.strip()]
-    retriever, gen = Retriever(), Generator()
+def load_tests():
+    return [json.loads(l) for l in (EVAL_DIR / "testset.jsonl").read_text().splitlines() if l.strip()]
+
+
+def retrieval_metrics(retriever, tests, k):
+    """Retrieval only, no LLM calls: fast enough to compare configurations."""
+    res = {"hit@1": [], f"hit@{k}": [], f"page_hit@{k}": [], f"MRR@{MRR_DEPTH}": []}
+    misses = []
+    for t in tests:
+        hits = retriever.search(t["question"], max(k, MRR_DEPTH))
+        ranks = [i for i, h in enumerate(hits, 1) if h.source == t["expected_source"]]
+        first = ranks[0] if ranks else None
+        res["hit@1"].append(int(first == 1))
+        res[f"hit@{k}"].append(int(first is not None and first <= k))
+        res[f"page_hit@{k}"].append(int(any(h.source == t["expected_source"] and h.page in t["expected_pages"]
+                                            for h in hits[:k])))
+        res[f"MRR@{MRR_DEPTH}"].append(1 / first if first else 0.0)
+        if not res[f"page_hit@{k}"][-1]:
+            misses.append(t["id"])
+    return {m: mean(v) for m, v in res.items()}, misses
+
+
+def evaluate(k: int, rerank_model: str):
+    tests = load_tests()
+    retriever, gen = Retriever(rerank_model=rerank_model), Generator()
     judge = Judge(gen)
     rows = []
     for t in tests:
@@ -131,7 +153,8 @@ def write_report(rows, summary, k):
     L = [f"# RAG evaluation report", "",
          f"Date: {date.today()}  ",
          f"Embeddings: `{config.EMBED_MODEL}` · Generator and judge: `{config.LLM_MODEL}` "
-         f"(generator thinking {'on' if config.LLM_THINKING else 'off'} with no-thinking fallback, judge thinking off) · k = {k}", "",
+         f"(generator thinking {'on' if config.LLM_THINKING else 'off'} with no-thinking fallback, judge thinking off) · k = {k}  ",
+         f"Reranker: `{RERANK}`" + (f" over top {config.RERANK_CANDIDATES} vector candidates" if RERANK.lower() != "none" else " (vector search only)"), "",
          "## Summary", "", "| Metric | Value |", "|---|---|"]
     L += [f"| {m} | {fmt(v)} |" for m, v in summary.items()]
     L += ["", "**Metric definitions.** hit@k: expected source file is among the top-k chunks. "
@@ -159,11 +182,37 @@ def write_report(rows, summary, k):
     (EVAL_DIR / "report.md").write_text("\n".join(L))
 
 
+RERANK = config.RERANK_MODEL
+
+
 def main():
+    global RERANK
     ap = argparse.ArgumentParser()
     ap.add_argument("--k", type=int, default=config.TOP_K)
-    k = ap.parse_args().k
-    rows = evaluate(k)
+    ap.add_argument("--rerank-model", default=config.RERANK_MODEL,
+                    help="cross-encoder name, or 'none' for vector search only")
+    ap.add_argument("--retrieval-only", nargs="*", metavar="MODEL",
+                    help="compare retrieval metrics (no LLM) for 'none' and the given rerankers")
+    args = ap.parse_args()
+    k = args.k
+
+    if args.retrieval_only is not None:
+        tests = load_tests()
+        configs = ["none"] + [m for m in args.retrieval_only if m.lower() != "none"]
+        table = {}
+        for m in configs:
+            t0 = time.time()
+            summary, misses = retrieval_metrics(Retriever(rerank_model=m), tests, k)
+            table[m] = (summary, misses, (time.time() - t0) / len(tests))
+        metrics = list(next(iter(table.values()))[0])
+        print("\n| Retriever | " + " | ".join(metrics) + " | s/question | page misses |")
+        print("|---" * (len(metrics) + 3) + "|")
+        for m, (sm, miss, sec) in table.items():
+            print(f"| {m} | " + " | ".join(fmt(sm[x]) for x in metrics) + f" | {sec:.2f} | {' '.join(miss)} |")
+        return
+
+    RERANK = args.rerank_model
+    rows = evaluate(k, RERANK)
     summary = summarize(rows, k)
     write_report(rows, summary, k)
     print("\n| Metric | Value |\n|---|---|")
