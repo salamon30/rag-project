@@ -1,0 +1,13 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+extend-exclude = ["data", "chroma_db"]
+
+[tool.ruff.lint]
+# pycodestyle, pyflakes, import order, bugbear
+select = ["E", "F", "I", "B"]
+ignore = ["E501"]  # long prompt and report strings read better unwrapped

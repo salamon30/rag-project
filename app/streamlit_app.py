@@ -55,7 +55,7 @@ examples = [
     "How large is the dataset used to develop MedSAM?",
 ]
 cols = st.columns(len(examples))
-for col, ex in zip(cols, examples):
+for col, ex in zip(cols, examples, strict=True):
     if col.button(ex, use_container_width=True):
         st.session_state.question = ex
 

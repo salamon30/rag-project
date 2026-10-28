@@ -1,5 +1,7 @@
 # Medical AI Paper QA: an evaluated RAG pipeline
 
+[![CI](https://github.com/salamon30/rag-project/actions/workflows/ci.yml/badge.svg)](https://github.com/salamon30/rag-project/actions/workflows/ci.yml)
+
 Ask questions about medical-AI research papers and get answers that cite the exact passage and page they came from. The system says *"I don't know"* instead of guessing when the retrieved text does not contain the answer.
 
 Built end to end in Python: PDF ingestion, two-stage retrieval (vector search + cross-encoder reranker), grounded generation, a measured evaluation suite and a web UI.
@@ -105,6 +107,16 @@ python -m eval.run_eval                                    # full evaluation (~1
 python -m eval.run_eval --retrieval-only cross-encoder/ms-marco-MiniLM-L-6-v2   # compare retrievers, no LLM
 ```
 
+### Tests
+
+```bash
+pip install -r requirements-dev.txt
+pytest -q          # 36 unit tests, about 5 s
+ruff check .
+```
+
+The tests use small fakes for the tokenizer, embedder, vector store, reranker and LLM client, so they need no API key, no model downloads and no PDFs. They cover chunk boundaries and overlap, the reranker reordering, the thinking fallback in the generator, judge output parsing, the refusal detector and the retrieval metrics. Several are regression tests for bugs found during development. GitHub Actions runs lint and tests on every push and pull request.
+
 ## Project structure
 
 ```
@@ -113,6 +125,7 @@ rag/       two-stage retriever, generator with citation rules, pipeline, CLI (St
 eval/      test set, metrics, LLM judge, report.md + results.csv (Stage C)
 app/       Streamlit UI
 scripts/   corpus download
+tests/     offline unit tests (pytest)
 ```
 
 ## Corpus

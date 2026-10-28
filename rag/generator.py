@@ -4,6 +4,7 @@ import os
 from openai import OpenAI
 
 from ingest import config
+
 from .retriever import Hit
 
 SYSTEM_PROMPT = """You answer questions about a collection of research papers.
