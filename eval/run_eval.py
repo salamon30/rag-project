@@ -19,6 +19,7 @@ load_dotenv()
 from ingest import config  # noqa: E402
 from rag.generator import Generator, build_context  # noqa: E402
 from rag.retriever import Retriever  # noqa: E402
+
 from .judge import Judge  # noqa: E402
 
 EVAL_DIR = Path(__file__).resolve().parent
@@ -36,7 +37,7 @@ def with_retry(fn, tries=3):
 
 
 def load_tests():
-    return [json.loads(l) for l in (EVAL_DIR / "testset.jsonl").read_text().splitlines() if l.strip()]
+    return [json.loads(line) for line in (EVAL_DIR / "testset.jsonl").read_text().splitlines() if line.strip()]
 
 
 def retrieval_metrics(retriever, tests, k):
@@ -70,7 +71,7 @@ def evaluate(k: int, rerank_model: str):
         page_hit = any(h.source == t["expected_source"] and h.page in t["expected_pages"] for h in top)
 
         try:
-            answer = with_retry(lambda: gen.answer(t["question"], top))
+            answer = with_retry(lambda t=t, top=top: gen.answer(t["question"], top))
             j = judge.score(t["question"], t["reference_answer"], build_context(top), answer)
             if _is_refusal(answer) and j["correctness"] is not None:
                 # every test question is answerable, so a refusal is never correct;
@@ -150,7 +151,7 @@ def write_report(rows, summary, k):
     else:
         fail_title = "Example failures"
 
-    L = [f"# RAG evaluation report", "",
+    L = ["# RAG evaluation report", "",
          f"Date: {date.today()}  ",
          f"Embeddings: `{config.EMBED_MODEL}` · Generator and judge: `{config.LLM_MODEL}` "
          f"(generator thinking {'on' if config.LLM_THINKING else 'off'} with no-thinking fallback, judge thinking off) · k = {k}  ",

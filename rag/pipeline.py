@@ -2,6 +2,7 @@
 from dataclasses import dataclass
 
 from ingest import config
+
 from .generator import Generator
 from .retriever import Hit, Retriever
 

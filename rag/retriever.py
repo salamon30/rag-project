@@ -44,7 +44,7 @@ class Retriever:
             Hit(text=doc, source=md["source"], page=md["page"], score=1 - dist,
                 vector_score=1 - dist, vector_rank=i)
             for i, (doc, md, dist) in enumerate(
-                zip(res["documents"][0], res["metadatas"][0], res["distances"][0]), start=1)
+                zip(res["documents"][0], res["metadatas"][0], res["distances"][0], strict=True), start=1)
         ]
 
     def search(self, question: str, k: int = config.TOP_K,
@@ -53,6 +53,6 @@ class Retriever:
             return self.vector_search(question, k)
         hits = self.vector_search(question, max(candidates, k))
         scores = self.reranker.predict([(question, h.text) for h in hits], show_progress_bar=False)
-        for h, s in zip(hits, scores):
+        for h, s in zip(hits, scores, strict=True):
             h.score = float(s)
         return sorted(hits, key=lambda h: h.score, reverse=True)[:k]
