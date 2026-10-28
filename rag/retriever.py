@@ -6,6 +6,7 @@ Stage 2 (cross-encoder reranker, optional): reads each (question, chunk) pair
 together and scores how well the chunk answers the question. More accurate but
 slower, so it only re-scores the stage-1 candidates.
 """
+from collections import Counter
 from dataclasses import dataclass
 
 from sentence_transformers import CrossEncoder, SentenceTransformer
@@ -28,8 +29,29 @@ def _enabled(name) -> bool:
     return bool(name) and name.lower() != "none"
 
 
+def diversify(ranked: list[Hit], k: int, max_per_source: int) -> list[Hit]:
+    """Take the top k in order, but at most max_per_source chunks from one paper.
+
+    Skipped chunks are used to fill up only if there are not enough other papers,
+    so the result still has k hits. max_per_source=0 means no cap."""
+    if max_per_source <= 0:
+        return ranked[:k]
+    picked, skipped, per_source = [], [], Counter()
+    for h in ranked:
+        if per_source[h.source] < max_per_source:
+            picked.append(h)
+            per_source[h.source] += 1
+        else:
+            skipped.append(h)
+        if len(picked) == k:
+            return picked
+    return picked + skipped[: k - len(picked)]
+
+
 class Retriever:
-    def __init__(self, model_name: str = config.EMBED_MODEL, rerank_model: str | None = config.RERANK_MODEL):
+    def __init__(self, model_name: str = config.EMBED_MODEL, rerank_model: str | None = config.RERANK_MODEL,
+                 max_per_source: int = config.MAX_PER_SOURCE):
+        self.max_per_source = max_per_source
         self.model = SentenceTransformer(model_name)
         self.collection = get_collection(config.CHROMA_DIR, config.COLLECTION)
         if self.collection.count() == 0:
@@ -50,9 +72,10 @@ class Retriever:
     def search(self, question: str, k: int = config.TOP_K,
                candidates: int = config.RERANK_CANDIDATES) -> list[Hit]:
         if not self.reranker:
-            return self.vector_search(question, k)
+            pool = k if not self.max_per_source else max(candidates, k)
+            return diversify(self.vector_search(question, pool), k, self.max_per_source)
         hits = self.vector_search(question, max(candidates, k))
         scores = self.reranker.predict([(question, h.text) for h in hits], show_progress_bar=False)
         for h, s in zip(hits, scores, strict=True):
             h.score = float(s)
-        return sorted(hits, key=lambda h: h.score, reverse=True)[:k]
+        return diversify(sorted(hits, key=lambda h: h.score, reverse=True), k, self.max_per_source)

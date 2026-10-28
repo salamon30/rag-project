@@ -11,7 +11,8 @@ SYSTEM_PROMPT = """You answer questions about a collection of research papers.
 Rules:
 - Use ONLY the numbered context passages. Do not use outside knowledge.
 - Cite every claim with the passage number in square brackets, e.g. [2] or [1][3].
-- If the passages do not contain the answer, reply exactly: "I don't know based on the provided documents."
+- If the question assumes something the passages contradict (a wrong name, number or method), do not refuse: say the assumption is wrong and give the correct fact with citations.
+- If the passages neither answer the question nor contradict it, reply exactly: "I don't know based on the provided documents."
 - Be concise."""
 
 

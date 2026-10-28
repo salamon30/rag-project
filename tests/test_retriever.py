@@ -40,6 +40,7 @@ class FakeReranker:
 def make(reranker=None, total=10):
     r = Retriever.__new__(Retriever)  # skip __init__: no model download, no DB
     r.model, r.collection, r.reranker = FakeEmbedder(), FakeCollection(total), reranker
+    r.max_per_source = 0
     return r
 
 
@@ -79,3 +80,23 @@ def test_candidate_pool_is_at_least_k():
 def test_rerank_can_be_disabled_by_name():
     assert not _enabled("none") and not _enabled("NONE") and not _enabled("") and not _enabled(None)
     assert _enabled("cross-encoder/ms-marco-MiniLM-L-6-v2")
+
+
+def test_diversify_caps_chunks_per_paper():
+    from rag.retriever import Hit, diversify
+    ranked = [Hit(f"a{i}", "a.pdf", i, 1.0) for i in range(5)] + [Hit("b0", "b.pdf", 1, 0.5)]
+    assert [h.text for h in diversify(ranked, 3, 0)] == ["a0", "a1", "a2"]          # no cap
+    assert [h.text for h in diversify(ranked, 3, 2)] == ["a0", "a1", "b0"]          # b.pdf gets a slot
+
+
+def test_diversify_fills_up_when_only_one_paper():
+    from rag.retriever import Hit, diversify
+    ranked = [Hit(f"a{i}", "a.pdf", i, 1.0) for i in range(5)]
+    assert [h.text for h in diversify(ranked, 4, 2)] == ["a0", "a1", "a2", "a3"]    # still k hits, order kept
+
+
+def test_search_applies_cap_after_reranking():
+    r = make(FakeReranker())
+    r.max_per_source = 1
+    hits = r.search("q", k=3, candidates=8)
+    assert len({h.source for h in hits}) == 3

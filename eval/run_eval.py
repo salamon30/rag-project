@@ -233,7 +233,8 @@ def write_report(rows, summary, k, suffix=""):
          f"Date: {date.today()}  ",
          f"Embeddings: `{config.EMBED_MODEL}` · Generator and judge: `{config.LLM_MODEL}` "
          f"(generator thinking {'on' if config.LLM_THINKING else 'off'} with no-thinking fallback, judge thinking off) · k = {k}  ",
-         f"Reranker: `{RERANK}`" + (f" over top {config.RERANK_CANDIDATES} vector candidates" if RERANK.lower() != "none" else " (vector search only)"), "",
+         f"Reranker: `{RERANK}`" + (f" over top {config.RERANK_CANDIDATES} vector candidates" if RERANK.lower() != "none" else " (vector search only)")
+         + (f" · at most {config.MAX_PER_SOURCE} chunks per paper" if config.MAX_PER_SOURCE else ""), "",
          "## Summary", "", "| Metric | Value |", "|---|---|"]
     L += [f"| {m} | {fmt(v)} |" for m, v in summary.items()]
     L += ["", "**Metric definitions.** hit@k: expected source file is among the top-k chunks. "
@@ -282,6 +283,8 @@ def main():
                     help="cross-encoder name, or 'none' for vector search only")
     ap.add_argument("--retrieval-only", nargs="*", metavar="MODEL",
                     help="compare retrieval metrics (no LLM) for 'none' and the given rerankers")
+    ap.add_argument("--max-per-source", type=int, nargs="*", metavar="N",
+                    help="with --retrieval-only: also compare these per-paper caps (0 = no cap)")
     ap.add_argument("--testset", default="testset",
                     help="file name in eval/ without .jsonl, e.g. testset_hard")
     args = ap.parse_args()
@@ -290,12 +293,15 @@ def main():
 
     if args.retrieval_only is not None:
         tests = load_tests(args.testset)
-        configs = ["none"] + [m for m in args.retrieval_only if m.lower() != "none"]
+        models = ["none"] + [m for m in args.retrieval_only if m.lower() != "none"]
+        caps = args.max_per_source or [config.MAX_PER_SOURCE]
         table = {}
-        for m in configs:
-            t0 = time.time()
-            summary, misses = retrieval_metrics(Retriever(rerank_model=m), tests, k)
-            table[m] = (summary, misses, (time.time() - t0) / len(tests))
+        for m in models:
+            for cap in caps:
+                t0 = time.time()
+                summary, misses = retrieval_metrics(Retriever(rerank_model=m, max_per_source=cap), tests, k)
+                label = m if len(caps) == 1 else f"{m}, max {cap or '∞'}/paper"
+                table[label] = (summary, misses, (time.time() - t0) / len(tests))
         metrics = list(next(iter(table.values()))[0])
         print("\n| Retriever | " + " | ".join(metrics) + " | s/question | page misses |")
         print("|---" * (len(metrics) + 3) + "|")
