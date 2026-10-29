@@ -11,7 +11,7 @@ Built end to end in Python: PDF ingestion, two-stage retrieval (vector search + 
 ## Highlights
 
 - **Grounded answers with citations.** Every claim is tied to a numbered passage `[n]`, shown with file, page and similarity score.
-- **Measured, not assumed.** A 20-question test set built from the papers scores retrieval (hit@k, MRR) and answers (LLM-as-judge faithfulness and correctness).
+- **Measured, not assumed.** Two test sets (40 questions, including unanswerable, false-premise and multi-paper ones) score retrieval (hit@k, MRR) and answers (LLM-as-judge faithfulness and correctness).
 - **Refuses instead of hallucinating.** When retrieval misses, the model declines rather than inventing an answer.
 - **Two-stage retrieval.** A cross-encoder reranker re-scores the vector-search candidates. It eliminated every refusal in the test set.
 - **Debugged with data.** Several design choices below were changed because the evaluation exposed a problem.
@@ -46,19 +46,22 @@ Reports: [with reranker](eval/report.md) · [without reranker](eval/report_no_re
 - **Multi-paper** (6): the answer needs two papers, e.g. comparing two models' MedQA scores.
 - **Paraphrase** (4): the question avoids the paper's keywords.
 
-| Question type | Correctness, first prompt | Correctness, current prompt | Said "I don't know" (current) |
+| Question type | First prompt | + false-premise rule | + query decomposition (current) |
 |---|---|---|---|
-| Unanswerable | 5.0 | 5.0 | 6 / 6 ✅ |
-| False premise | 2.0 | **5.0** | 0 / 4 |
-| Multi-paper | 3.0 | 3.7 | 1 / 6 |
-| Paraphrase | 5.0 | 5.0 | 0 / 4 |
-| **All 20** | 3.8 | **4.6** | |
+| Unanswerable (declined) | 5.0 (6 / 6) | 5.0 (6 / 6) | 5.0 (6 / 6) ✅ |
+| False premise | 2.0 | **5.0** | 4.0 ¹ |
+| Multi-paper | 3.0 | 3.7 | **5.0** |
+| Paraphrase | 5.0 | 5.0 | 5.0 |
+| **All 20** | 3.8 | 4.6 | **4.8** |
 
-Report: [eval/report_hard.md](eval/report_hard.md). The original 20 questions still score 5.0 with the current prompt.
+Correctness 1-5. Reports: [current](eval/report_hard.md) · [without decomposition](eval/report_hard_no_decompose.md). The original 20 questions score 5.0 in every column.
+
+¹ One false-premise answer (h08) flipped to a refusal although it received exactly the same five passages as the run before: run-to-run variation of the LLM, not an effect of decomposition.
 
 **What the hard set found.**
 1. **The prompt was too strict.** The model refused false-premise questions because the passages did not explain *why ResNet-50 was chosen*. One added rule ("if the passages contradict the question's assumption, correct it with citations") fixed all four without making it answer any unanswerable question.
-2. **The reranker can crowd out a second paper.** For multi-paper questions it sometimes fills all five slots from one paper, and the model then correctly says it lacks the other half. Capping chunks per paper fixed that but pushed the right page out for single-paper questions (page_hit@5 0.90 → 0.70), so the cap stays off; see [diversity_comparison.md](eval/diversity_comparison.md). Splitting comparison questions into one search per paper is the next step.
+2. **The reranker can crowd out a second paper.** For multi-paper questions it sometimes filled all five slots from one paper, and the model then correctly said it lacked the other half. A fixed cap on chunks per paper fixed that but pushed the right page out for single-paper questions (page_hit@5 0.90 → 0.70), so it stays off ([diversity_comparison.md](eval/diversity_comparison.md)).
+3. **Query decomposition fixed it per question.** An LLM call splits a comparison into one search per paper, and the results are interleaved. The first prompt split 35 of 40 questions, including single-paper ones ("U-Net challenge" + "U-Net image types"), and page hits on the original set fell to 0.65. Rather than tuning the prompt further, the retriever now checks each split: it is kept only if the sub-queries' best hits come from different papers. Multi-paper retrieval (all papers in top 5) rose from 0.79 to 0.93 and multi-paper correctness from 3.7 to 5.0; the original set's answers are unchanged.
 
 ## Architecture
 
@@ -71,7 +74,8 @@ flowchart LR
         D --> E[(ChromaDB<br/>cosine)]
     end
     subgraph Query
-        Q[Question] --> QE[Query embedding]
+        Q[Question] --> QD[Query decomposition<br/>one search per paper]
+        QD --> QE[Query embedding]
         QE --> E
         E --> C50[Top 50 candidates]
         C50 --> RR[Cross-encoder reranker<br/>MiniLM-L-6]
@@ -80,7 +84,7 @@ flowchart LR
         L --> R[Answer with citations<br/>or refusal]
     end
     subgraph Evaluation
-        T[Test set<br/>20 Q + references] --> M[hit@k, MRR]
+        T[2 test sets<br/>40 Q + references] --> M[hit@k, all_sources@k, MRR]
         R --> J[LLM judge<br/>faithfulness, correctness]
     end
 ```
@@ -91,6 +95,7 @@ flowchart LR
 | Chunking | ~500 tokens, 75 overlap; boundaries from the embedding model's tokenizer, text sliced from the original page |
 | Embeddings | `BAAI/bge-small-en-v1.5` (384-dim, 512-token window, runs locally) |
 | Vector store | ChromaDB, persistent, cosine distance, deterministic chunk IDs for idempotent re-ingestion |
+| Query decomposition | One short LLM call splits multi-paper questions into one search per paper; a split is kept only if the searches reach different papers |
 | Reranker | `cross-encoder/ms-marco-MiniLM-L-6-v2` re-scores the top 50 vector hits; chosen over `bge-reranker-base` for equal hit rates at ~6x lower latency |
 | LLM | `nvidia/nemotron-3.5-lightning-30b-a3b` via NVIDIA NIM's OpenAI-compatible API |
 | UI | Streamlit, with shareable `?q=` question links |
@@ -106,6 +111,8 @@ These came from measuring, not from the first draft.
 5. **Keep the original text, not the tokenizer's version.** Chunks were first built by decoding token windows. Because the embedding tokenizer is uncased, stored text came out lowercased with `##` word pieces and `[UNK]`, and that is what the LLM and citations saw. Chunks are now sliced from the original page using the tokenizer's character offsets.
 6. **Rerankers: measure the trade-off.** A retrieval-only evaluation mode (no LLM calls, under a minute) compared two cross-encoders. Both doubled page-level hits; the smaller one was ~6x faster, so it is the default.
 7. **Errors must not lose the run.** A single failed API call used to abort the whole evaluation. Each question is now isolated and failures are reported as unscored.
+8. **Let the LLM propose and the code check.** Prompt tuning alone swung query decomposition between splitting everything and splitting nothing. An eager prompt plus a cheap retrieval check (do the sub-queries reach different papers?) gave both recall and precision.
+9. **Check the input before blaming the change.** Two answers changed after decomposition was switched on, but both received identical passages in both runs. One was LLM variation; the other was a correct decline that the scoring rule did not recognise. The rule was fixed and saved answers are re-scored without new LLM calls (`--rescore`).
 
 ## Quickstart
 
@@ -134,7 +141,7 @@ python -m eval.run_eval --retrieval-only cross-encoder/ms-marco-MiniLM-L-6-v2   
 
 ```bash
 pip install -r requirements-dev.txt
-pytest -q          # 36 unit tests, about 5 s
+pytest -q          # 72 unit tests, about 5 s
 ruff check .
 ```
 
@@ -160,6 +167,7 @@ Ten open-access arXiv papers on medical AI and RAG: the original RAG paper, a RA
 - **Same model as generator and judge.** This can inflate answer scores through self-preference. A different judge model would be more reliable.
 - **The prompt fix was tuned and measured on the same hard set.** A fresh, held-out set is needed to confirm it generalises.
 - **The judge is lenient on partial answers.** It gave 5/5 to a multi-paper answer that covered only one of the two papers (h15). Answer scores are spot-checked by hand, and refusals are scored by rule rather than by the judge.
-- **Multi-paper questions** still fail when one paper is missing from the top 5 (see above).
+- **Run-to-run variation.** LLM answers and decomposition can differ between identical runs; single-question changes should be checked against the retrieved passages before they are attributed to a code change.
+- **Decomposition cost.** One extra LLM call and up to three searches per question (about 1.5 s more on a laptop). `DECOMPOSE=0` turns it off.
 - **Latency.** Reranking adds about 0.6 s per question on a laptop CPU. Hybrid BM25 + dense search could reduce the candidate set further.
 - **Per-page chunking** keeps citations exact but splits passages that cross page boundaries.

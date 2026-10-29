@@ -147,3 +147,9 @@ def test_search_many_keeps_split_across_papers():
     r.search = search
     hits = r.search_many(["about a", "about b"], k=4, question="original")
     assert [h.source for h in hits] == ["a.pdf", "b.pdf", "a.pdf", "b.pdf"]
+
+
+def test_last_searches_records_what_really_ran():
+    r = make()
+    r.search_many(["aspect one", "aspect two"], k=3, question="original")
+    assert r.last_searches == ["original"]  # split dropped: one paper

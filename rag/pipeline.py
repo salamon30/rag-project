@@ -13,7 +13,7 @@ class RagResult:
     question: str
     answer: str
     hits: list[Hit]
-    queries: list[str] = field(default_factory=list)  # the searches that were run
+    queries: list[str] = field(default_factory=list)  # the searches that were run (several if split)
 
 
 class RagPipeline:
@@ -26,4 +26,4 @@ class RagPipeline:
         queries = self.decomposer.split(question) if self.decomposer else [question]
         hits = self.retriever.search_many(queries, k, question=question)
         # the generator always sees the original question, only the search is split
-        return RagResult(question, self.generator.answer(question, hits), hits, queries)
+        return RagResult(question, self.generator.answer(question, hits), hits, self.retriever.last_searches)

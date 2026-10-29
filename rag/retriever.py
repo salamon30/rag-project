@@ -89,9 +89,10 @@ class Retriever:
         A split is kept only if the sub-queries' top hits come from at least two papers.
         Otherwise it was a split into aspects of one paper, which only takes slots away
         from the best passages, so the original question is searched instead."""
-        if len(queries) == 1:
-            return self.search(queries[0], k, candidates)
-        results = [self.search(q, k, candidates) for q in queries]
-        if len({r[0].source for r in results if r}) < 2:
-            return self.search(question or queries[0], k, candidates)
-        return interleave(results, k)
+        if len(queries) > 1:
+            results = [self.search(q, k, candidates) for q in queries]
+            if len({r[0].source for r in results if r}) >= 2:
+                self.last_searches = list(queries)
+                return interleave(results, k)
+        self.last_searches = [question or queries[0]]
+        return self.search(self.last_searches[0], k, candidates)

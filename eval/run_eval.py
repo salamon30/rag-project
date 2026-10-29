@@ -78,7 +78,8 @@ def rank_metrics(hits, expected, k):
 def search(retriever, decomposer, question, n):
     """Run the question's searches. Returns the hits and the queries that were used."""
     queries = decomposer.split(question) if decomposer else [question]
-    return retriever.search_many(queries, n, question=question), queries
+    hits = retriever.search_many(queries, n, question=question)
+    return hits, getattr(retriever, "last_searches", queries)
 
 
 def retrieval_metrics(retriever, tests, k, decomposer=None):
@@ -168,7 +169,8 @@ REFUSAL = re.compile(
 # while saying the requested fact is missing.
 DECLINE = re.compile(
     REFUSAL.pattern + r"|(not|n.t) (specified|stated|reported|mentioned|provided|given|available|disclosed)"
-    r"|(do|does) not (specify|state|report|give|disclose)|no (mention|information|data) (of|about|on)", re.I)
+    r"|(do|does) not (specify|state|report|give|disclose)|no (mention|information|data) (of|about|on)"
+    r"|\bno\b[^.]{0,80}\b(is|are|was|were) (reported|provided|mentioned|described|given|stated)", re.I)
 
 
 def _is_refusal(answer):
@@ -283,6 +285,41 @@ def write_report(rows, summary, k, suffix=""):
     (EVAL_DIR / f"report{suffix}.md").write_text("\n".join(L))
 
 
+def load_results(suffix):
+    """Read a saved results CSV back into rows with numbers and None restored."""
+    def num(v):
+        if v == "":
+            return None
+        try:
+            return int(v)
+        except ValueError:
+            try:
+                return float(v)
+            except ValueError:
+                return v
+    text_cols = {"id", "type", "question", "queries", "expected", "retrieved", "answer", "reference_answer",
+                 "faithfulness_reason", "correctness_reason"}
+    with open(EVAL_DIR / f"results{suffix}.csv", newline="") as f:
+        return [{c: (v if c in text_cols else num(v)) for c, v in row.items()} for row in csv.DictReader(f)]
+
+
+def rescore(rows):
+    """Re-apply the rule-based refusal scoring to saved answers (no LLM calls).
+
+    Used when a scoring rule is fixed, so a measurement bug does not need a full rerun."""
+    changed = []
+    for r in rows:
+        if r["correctness"] is None or r["answer"].startswith("GENERATION ERROR"):
+            continue
+        before = (r["said_dont_know"], r["correctness"])
+        j = {"correctness": r["correctness"], "correctness_reason": r["correctness_reason"]}
+        r["said_dont_know"] = int(apply_refusal_rules(r, r["answer"], j))
+        r["correctness"], r["correctness_reason"] = j["correctness"], j["correctness_reason"]
+        if (r["said_dont_know"], r["correctness"]) != before:
+            changed.append(r["id"])
+    return changed
+
+
 RERANK = config.RERANK_MODEL
 DECOMPOSE = config.DECOMPOSE
 
@@ -297,13 +334,25 @@ def main():
                     help="compare retrieval metrics (no LLM) for 'none' and the given rerankers")
     ap.add_argument("--max-per-source", type=int, nargs="*", metavar="N",
                     help="with --retrieval-only: also compare these per-paper caps (0 = no cap)")
-    ap.add_argument("--decompose", action="store_true",
-                    help="split multi-paper questions into one search per paper (extra LLM call)")
+    ap.add_argument("--decompose", action=argparse.BooleanOptionalAction, default=config.DECOMPOSE,
+                    help="split multi-paper questions into one search per paper (default from config)")
+    ap.add_argument("--rescore", metavar="SUFFIX", nargs="?", const="",
+                    help="re-apply scoring rules to eval/results{SUFFIX}.csv without LLM calls")
     ap.add_argument("--testset", default="testset",
                     help="file name in eval/ without .jsonl, e.g. testset_hard")
     args = ap.parse_args()
     k = args.k
     suffix = args.testset.removeprefix("testset")  # testset_hard -> report_hard.md
+
+    if args.rescore is not None:
+        rows = load_results(args.rescore)
+        print("changed:", rescore(rows) or "nothing")
+        DECOMPOSE = any(" || " in (r.get("queries") or "") for r in rows)
+        summary = summarize(rows, k)
+        write_report(rows, summary, k, args.rescore)
+        for m, v in summary.items():
+            print(f"| {m} | {fmt(v)} |")
+        return
 
     if args.retrieval_only is not None:
         tests = load_tests(args.testset)
@@ -327,7 +376,7 @@ def main():
         return
 
     RERANK = args.rerank_model
-    DECOMPOSE = DECOMPOSE or args.decompose
+    DECOMPOSE = args.decompose
     rows = evaluate(k, RERANK, args.testset, DECOMPOSE)
     summary = summarize(rows, k)
     write_report(rows, summary, k, suffix)
