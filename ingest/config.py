@@ -23,6 +23,9 @@ TOP_K = 5
 # on hit@5 and page_hit@5 in eval at ~6x lower latency (0.7 s vs 4.3 s per question).
 RERANK_MODEL = os.getenv("RERANK_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2")
 RERANK_CANDIDATES = 50
+# Cap on chunks per paper in the final top-k (0 = no cap). Without a cap the reranker
+# can fill all k slots from one paper, which starves questions that need two papers.
+MAX_PER_SOURCE = int(os.getenv("MAX_PER_SOURCE", "0"))
 # Thinking on gives better grounded answers and keeps [n] citations (eval showed
 # thinking-off answers dropped citations and misread context). Reasoning can still
 # exhaust the budget, so the generator falls back to thinking-off once if needed.

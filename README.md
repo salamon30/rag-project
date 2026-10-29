@@ -35,7 +35,30 @@ Reports: [with reranker](eval/report.md) · [without reranker](eval/report_no_re
 
 **What changed.** Vector search usually found the right *paper* but often not the *page* with the answer, so the model correctly refused. In the hardest case the answer passage sat at rank 28. The cross-encoder reads the question and each candidate passage together and moves the answering passage to the top. The model's answers were already faithful; the reranker gave them the right evidence.
 
-**Reading the scores honestly.** Correctness of 5.0 means this test set no longer separates good from great; a harder, larger set is the next step. Manual spot checks agree with the judge, except one answer that omitted half of the reference and would deserve a 4.
+**Reading the scores honestly.** Correctness of 5.0 means this test set no longer separates good from great, so a second, harder set was built (below). Manual spot checks agree with the judge, except one answer that omitted half of the reference and would deserve a 4.
+
+### Hard test set
+
+[20 more questions](eval/testset_hard.jsonl) of four kinds the first set never asked, each checked against the PDF text:
+
+- **Unanswerable** (6): the topic is in the corpus but the fact is not, e.g. *"How much did it cost to train MedSAM?"* The system must say it does not know.
+- **False premise** (4): *"Why did CheXNet use ResNet-50?"* (it uses DenseNet-121). The system must correct the question.
+- **Multi-paper** (6): the answer needs two papers, e.g. comparing two models' MedQA scores.
+- **Paraphrase** (4): the question avoids the paper's keywords.
+
+| Question type | Correctness, first prompt | Correctness, current prompt | Said "I don't know" (current) |
+|---|---|---|---|
+| Unanswerable | 5.0 | 5.0 | 6 / 6 ✅ |
+| False premise | 2.0 | **5.0** | 0 / 4 |
+| Multi-paper | 3.0 | 3.7 | 1 / 6 |
+| Paraphrase | 5.0 | 5.0 | 0 / 4 |
+| **All 20** | 3.8 | **4.6** | |
+
+Report: [eval/report_hard.md](eval/report_hard.md). The original 20 questions still score 5.0 with the current prompt.
+
+**What the hard set found.**
+1. **The prompt was too strict.** The model refused false-premise questions because the passages did not explain *why ResNet-50 was chosen*. One added rule ("if the passages contradict the question's assumption, correct it with citations") fixed all four without making it answer any unanswerable question.
+2. **The reranker can crowd out a second paper.** For multi-paper questions it sometimes fills all five slots from one paper, and the model then correctly says it lacks the other half. Capping chunks per paper fixed that but pushed the right page out for single-paper questions (page_hit@5 0.90 → 0.70), so the cap stays off; see [diversity_comparison.md](eval/diversity_comparison.md). Splitting comparison questions into one search per paper is the next step.
 
 ## Architecture
 
@@ -135,6 +158,8 @@ Ten open-access arXiv papers on medical AI and RAG: the original RAG paper, a RA
 ## Limitations and next steps
 
 - **Same model as generator and judge.** This can inflate answer scores through self-preference. A different judge model would be more reliable.
-- **Test set is now too easy.** With the reranker every question is answered correctly, so 20 questions no longer show headroom. A larger set with multi-hop and unanswerable questions is the next evaluation step.
+- **The prompt fix was tuned and measured on the same hard set.** A fresh, held-out set is needed to confirm it generalises.
+- **The judge is lenient on partial answers.** It gave 5/5 to a multi-paper answer that covered only one of the two papers (h15). Answer scores are spot-checked by hand, and refusals are scored by rule rather than by the judge.
+- **Multi-paper questions** still fail when one paper is missing from the top 5 (see above).
 - **Latency.** Reranking adds about 0.6 s per question on a laptop CPU. Hybrid BM25 + dense search could reduce the candidate set further.
 - **Per-page chunking** keeps citations exact but splits passages that cross page boundaries.

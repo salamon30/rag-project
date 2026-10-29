@@ -1,6 +1,6 @@
 # RAG evaluation report
 
-Date: 2026-10-27  
+Date: 2026-10-28  
 Embeddings: `BAAI/bge-small-en-v1.5` · Generator and judge: `nvidia/nemotron-3.5-lightning-30b-a3b` (generator thinking on with no-thinking fallback, judge thinking off) · k = 5  
 Reranker: `cross-encoder/ms-marco-MiniLM-L-6-v2` over top 50 vector candidates
 
@@ -13,7 +13,7 @@ Reranker: `cross-encoder/ms-marco-MiniLM-L-6-v2` over top 50 vector candidates
 | hit@5 | 1.000 |
 | page_hit@5 | 0.900 |
 | MRR@10 | 0.877 |
-| answers with [n] citations | 1.000 |
+| answers with [n] citations | 0.950 |
 | refusals | 0 |
 | faithfulness (1-5) | 5.000 |
 | correctness (1-5) | 5.000 |
@@ -25,58 +25,60 @@ Reranker: `cross-encoder/ms-marco-MiniLM-L-6-v2` over top 50 vector candidates
 
 ## Per-question results
 
-| id | question | first rank | hit@5 | page hit | F | C |
-|---|---|---|---|---|---|---|
-| q01 | What are the two RAG model variants proposed by Lewis et al., and how do they differ? | 3 | 1 | 1 | 5 | 5 |
-| q02 | How was Wikipedia split to build the document index in the original RAG paper, and how many documents resulted? | 2 | 1 | 1 | 5 | 5 |
-| q03 | Which pre-trained model is used as the generator in the original RAG architecture? | 1 | 1 | 1 | 5 | 5 |
-| q04 | How can a retrieval-augmented model's world knowledge be updated without retraining it? | 1 | 1 | 1 | 5 | 5 |
-| q05 | What neural network architecture does CheXNet use? | 1 | 1 | 1 | 5 | 5 |
-| q06 | How large is the ChestX-ray14 dataset used to train CheXNet? | 1 | 1 | 1 | 5 | 5 |
-| q07 | How did CheXNet's F1 score for pneumonia detection compare to the radiologists? | 1 | 1 | 1 | 5 | 5 |
-| q08 | How many convolutional layers does the U-Net network have in total? | 1 | 1 | 1 | 5 | 5 |
-| q09 | Which data augmentation technique was key for training a biomedical segmentation network with very few annotated images? | 1 | 1 | 1 | 5 | 5 |
-| q10 | Which challenge did U-Net win in 2015, and on which kinds of images? | 1 | 1 | 1 | 5 | 5 |
-| q11 | What is MultiMedQA and which new dataset was introduced with it? | 5 | 1 | 0 | 5 | 5 |
-| q12 | What accuracy did Flan-PaLM reach on MedQA, and how did it compare to the prior state of the art? | 2 | 1 | 1 | 5 | 5 |
-| q13 | What score did Med-PaLM 2 achieve on MedQA, and how much did it improve over Med-PaLM? | 1 | 1 | 1 | 5 | 5 |
-| q14 | What novel prompting strategy was introduced with Med-PaLM 2? | 1 | 1 | 0 | 5 | 5 |
-| q15 | How did GPT-4 perform on the USMLE relative to the passing score, without specialized prompting? | 1 | 1 | 1 | 5 | 5 |
-| q16 | What three prompting techniques are combined in Medprompt, and what MedQA accuracy does it reach with GPT-4? | 1 | 1 | 1 | 5 | 5 |
-| q17 | What is the MIRAGE benchmark and how many questions does it contain? | 1 | 1 | 1 | 5 | 5 |
-| q18 | By how much does the MedRAG toolkit improve LLM accuracy over chain-of-thought prompting? | 1 | 1 | 1 | 5 | 5 |
-| q19 | Into which three paradigms does the RAG survey categorize the evolution of RAG? | 1 | 1 | 1 | 5 | 5 |
-| q20 | How large and diverse is the dataset used to develop MedSAM? | 1 | 1 | 1 | 5 | 5 |
+| id | type | question | first rank | hit@5 | page hit | F | C |
+|---|---|---|---|---|---|---|---|
+| q01 | single | What are the two RAG model variants proposed by Lewis et al., and how do they differ? | 3 | 1 | 1 | 5 | 5 |
+| q02 | single | How was Wikipedia split to build the document index in the original RAG paper, and how many documents resulted? | 2 | 1 | 1 | 5 | 5 |
+| q03 | single | Which pre-trained model is used as the generator in the original RAG architecture? | 1 | 1 | 1 | 5 | 5 |
+| q04 | single | How can a retrieval-augmented model's world knowledge be updated without retraining it? | 1 | 1 | 1 | 5 | 5 |
+| q05 | single | What neural network architecture does CheXNet use? | 1 | 1 | 1 | 5 | 5 |
+| q06 | single | How large is the ChestX-ray14 dataset used to train CheXNet? | 1 | 1 | 1 | 5 | 5 |
+| q07 | single | How did CheXNet's F1 score for pneumonia detection compare to the radiologists? | 1 | 1 | 1 | 5 | 5 |
+| q08 | single | How many convolutional layers does the U-Net network have in total? | 1 | 1 | 1 | 5 | 5 |
+| q09 | single | Which data augmentation technique was key for training a biomedical segmentation network with very few annotated images? | 1 | 1 | 1 | 5 | 5 |
+| q10 | single | Which challenge did U-Net win in 2015, and on which kinds of images? | 1 | 1 | 1 | 5 | 5 |
+| q11 | single | What is MultiMedQA and which new dataset was introduced with it? | 5 | 1 | 0 | 5 | 5 |
+| q12 | single | What accuracy did Flan-PaLM reach on MedQA, and how did it compare to the prior state of the art? | 2 | 1 | 1 | 5 | 5 |
+| q13 | single | What score did Med-PaLM 2 achieve on MedQA, and how much did it improve over Med-PaLM? | 1 | 1 | 1 | 5 | 5 |
+| q14 | single | What novel prompting strategy was introduced with Med-PaLM 2? | 1 | 1 | 0 | 5 | 5 |
+| q15 | single | How did GPT-4 perform on the USMLE relative to the passing score, without specialized prompting? | 1 | 1 | 1 | 5 | 5 |
+| q16 | single | What three prompting techniques are combined in Medprompt, and what MedQA accuracy does it reach with GPT-4? | 1 | 1 | 1 | 5 | 5 |
+| q17 | single | What is the MIRAGE benchmark and how many questions does it contain? | 1 | 1 | 1 | 5 | 5 |
+| q18 | single | By how much does the MedRAG toolkit improve LLM accuracy over chain-of-thought prompting? | 1 | 1 | 1 | 5 | 5 |
+| q19 | single | Into which three paradigms does the RAG survey categorize the evolution of RAG? | 1 | 1 | 1 | 5 | 5 |
+| q20 | single | How large and diverse is the dataset used to develop MedSAM? | 1 | 1 | 1 | 5 | 5 |
 
 ## No hard failures; weakest cases
 
 ### q11: What is MultiMedQA and which new dataset was introduced with it?
 
-- **Expected:** `med_palm_2022.pdf` p.1 2
+- **Type:** single · **Expected:** med_palm_2022.pdf:p1 2
 - **Retrieved:** med_palm2_2023.pdf:p3; med_palm2_2023.pdf:p1; gpt4_medical_challenge_2023.pdf:p3; med_palm2_2023.pdf:p5; med_palm_2022.pdf:p8
-- **Answer:** MultiMedQA is a diverse benchmark for medical question-answering spanning medical exams, consumer health, and medical research [1]. The new dataset introduced alongside it is HealthSearchQA, a consumer medical question-answering dataset curated from seed medical conditions and their associated symptoms [5][4]. Additionally, two adversarial long-form datasets (MultiMedQA 140 and 1066) were introduced for evaluation [1].
+- **Answer:** MultiMedQA is described in [1] as "a diverse benchmark for medical question-answering spanning medical exams, consumer health, and medical research." It includes multiple-choice datasets (MedQA, MedMCQA, PubMedQA, MMLU clinical topics) and long-form question sets sampled from sources such as HealthSearchQA, LiveQA, and MedicationQA [1]. Alongside MultiMedQA, two new adversarial long-form datasets were introduced [1][2], including 240 long-form "adversarial" questions designed to probe LLM limitations [2].
 - **Reference:** A benchmark combining six existing medical QA datasets (MedQA, MedMCQA, PubMedQA, LiveQA, MedicationQA, MMLU clinical topics) plus the new HealthSearchQA dataset of commonly searched health questions.
-- **Faithfulness 5:** All claims in the answer are directly supported by the provided context.
-- **Correctness 5:** The answer accurately identifies MultiMedQA as a benchmark and HealthSearchQA as the new dataset introduced alongside it, matching the reference answer's key facts.
+- **Faithfulness 5:** All claims in the answer are supported by the context, specifically citing the definition of MultiMedQA and the inclusion of HealthSearchQA.
+- **Correctness 5:** The answer accurately matches the reference answer, correctly identifying MultiMedQA as the benchmark and HealthSearchQA as the new dataset.
 
 ### q01: What are the two RAG model variants proposed by Lewis et al., and how do they differ?
 
-- **Expected:** `rag_lewis_2020.pdf` p.3
+- **Type:** single · **Expected:** rag_lewis_2020.pdf:p3
 - **Retrieved:** medrag_benchmark_2024.pdf:p2; medrag_benchmark_2024.pdf:p2; rag_lewis_2020.pdf:p3; rag_survey_gao_2023.pdf:p17; rag_survey_gao_2023.pdf:p12
-- **Answer:** The two RAG model variants proposed by Lewis et al. are **RAG-Sequence** and **RAG-Token**, as described in [3].  
-- **RAG-Sequence** uses the same retrieved document to generate the entire sequence, treating the document as a single latent variable marginalized via a top-K approximation.  
-- **RAG-Token** allows a different latent document to be selected for each target token, enabling the generator to draw content from multiple documents when producing an answer.  
+- **Answer:** The two RAG model variants proposed by Lewis et al. are **RAG-Sequence** and **RAG-Token**, as described in passage [3].
 
-The key difference is that RAG-Sequence relies on a single document throughout, while RAG-Token can switch documents per token, allowing integration of information from several retrieved passages. [3]
+- **RAG-Sequence** uses the same retrieved document to predict each target token. Formally, the probability is marginalized over a single document z for the entire sequence: pRAG-Sequence(y|x) ≈ ∑z∈top-k(p(·|x)) pη(z|x) ∏ᵢ pθ(yi|x,z,y₁:ᵢ⁻¹).
+
+- **RAG-Token** can predict each target token based on a different document, allowing the generator to select content from several documents when producing an answer. Formally, the probability marginalizes separately for each token: pRAG-Token(y|x) ≈ ∏ᵢ ∑z∈top-k(p(·|x)) pη(z|x) pθ(yi|x,z,y₁:ᵢ⁻¹).
+
+The key difference is that RAG-Sequence treats the retrieved document as a single latent variable for the complete sequence, while RAG-Token draws a potentially different latent document for each target token, enabling the model to draw from multiple documents during generation.
 - **Reference:** RAG-Sequence uses the same retrieved document to generate the whole output sequence; RAG-Token can use a different retrieved document for each target token.
-- **Faithfulness 5:** The answer accurately summarizes the two variants and their difference as described in the context.
-- **Correctness 5:** The answer correctly identifies RAG-Sequence and RAG-Token and accurately describes their key difference regarding document usage per token.
+- **Faithfulness 5:** The answer accurately summarizes the two RAG variants and their differences as described in the context.
+- **Correctness 5:** The answer correctly identifies RAG-Sequence and RAG-Token and accurately describes how they differ in document usage.
 
 ### q02: How was Wikipedia split to build the document index in the original RAG paper, and how many documents resulted?
 
-- **Expected:** `rag_lewis_2020.pdf` p.4
+- **Type:** single · **Expected:** rag_lewis_2020.pdf:p4
 - **Retrieved:** rag_survey_gao_2023.pdf:p3; rag_lewis_2020.pdf:p4; rag_lewis_2020.pdf:p8; rag_lewis_2020.pdf:p7; rag_survey_gao_2023.pdf:p8
-- **Answer:** According to [2], Wikipedia was split into disjoint 100-word chunks, resulting in a total of 21M documents to build the document index.
+- **Answer:** According to the original RAG paper (Lewis et al. 2020), each Wikipedia article was split into disjoint 100-word chunks, resulting in a total of 21M documents [2].
 - **Reference:** The December 2018 Wikipedia dump was split into disjoint 100-word chunks, giving about 21 million documents, indexed with FAISS.
-- **Faithfulness 5:** The answer accurately reflects the context without any unsupported claims.
-- **Correctness 5:** The answer exactly matches the reference answer regarding the chunking method and document count.
+- **Faithfulness 5:** The answer correctly states that Wikipedia articles were split into 100-word chunks resulting in 21M documents, which is fully supported by the context.
+- **Correctness 5:** The answer matches the reference answer exactly, stating the 100-word chunk split and 21M document count.

@@ -1,8 +1,13 @@
-"""Stage C: python -m eval.run_eval [--k 5]
+"""Stage C: python -m eval.run_eval [--k 5] [--testset testset_hard]
 
-Retrieval metrics: source hit@1, hit@k, page hit@k, MRR@10.
+Retrieval metrics (answerable questions): source hit@1, hit@k, all_sources@k, page hit@k, MRR@10.
 Answer metrics (LLM judge, 1-5): faithfulness, correctness.
-Writes eval/results.csv and eval/report.md.
+Refusal metrics: refusal recall on unanswerable questions, false refusals on answerable ones.
+Writes eval/results{suffix}.csv and eval/report{suffix}.md, e.g. report_hard.md for testset_hard.
+
+Question types: single (one paper, wording close to the paper), unanswerable (topic is in
+the corpus but the fact is not), false_premise (the question assumes something wrong),
+multi_hop (needs two papers), paraphrase (avoids the paper's keywords).
 """
 import argparse
 import csv
@@ -36,64 +41,103 @@ def with_retry(fn, tries=3):
             time.sleep(5 * (i + 1))
 
 
-def load_tests():
-    return [json.loads(line) for line in (EVAL_DIR / "testset.jsonl").read_text().splitlines() if line.strip()]
+def load_tests(name="testset"):
+    """Load a test set and normalise it: expected_pages becomes {source: [pages]}.
+
+    The original set has one expected_source and a page list; newer sets give
+    expected_pages per source so a question can need several papers."""
+    tests = [json.loads(line) for line in (EVAL_DIR / f"{name}.jsonl").read_text().splitlines() if line.strip()]
+    for t in tests:
+        t.setdefault("type", "single")
+        if "expected_source" in t:
+            t["expected_pages"] = {t.pop("expected_source"): t["expected_pages"]}
+    return tests
+
+
+def answerable(t):
+    return t["type"] != "unanswerable"
+
+
+def rank_metrics(hits, expected, k):
+    """Retrieval metrics for one question. expected = {source: [pages]}."""
+    ranks = [i for i, h in enumerate(hits, 1) if h.source in expected]
+    first = ranks[0] if ranks else None
+    top = hits[:k]
+    return {
+        "hit@1": int(first == 1),
+        f"hit@{k}": int(first is not None and first <= k),
+        # every expected paper is in the top-k (only differs from hit@k for multi_hop)
+        f"all_sources@{k}": int(all(any(h.source == s for h in top) for s in expected)),
+        f"page_hit@{k}": int(any(h.page in expected.get(h.source, ()) for h in top)),
+        "rr": 1 / first if first else 0.0,
+        "first_rank": first,
+    }
 
 
 def retrieval_metrics(retriever, tests, k):
     """Retrieval only, no LLM calls: fast enough to compare configurations."""
-    res = {"hit@1": [], f"hit@{k}": [], f"page_hit@{k}": [], f"MRR@{MRR_DEPTH}": []}
-    misses = []
-    for t in tests:
-        hits = retriever.search(t["question"], max(k, MRR_DEPTH))
-        ranks = [i for i, h in enumerate(hits, 1) if h.source == t["expected_source"]]
-        first = ranks[0] if ranks else None
-        res["hit@1"].append(int(first == 1))
-        res[f"hit@{k}"].append(int(first is not None and first <= k))
-        res[f"page_hit@{k}"].append(int(any(h.source == t["expected_source"] and h.page in t["expected_pages"]
-                                            for h in hits[:k])))
-        res[f"MRR@{MRR_DEPTH}"].append(1 / first if first else 0.0)
-        if not res[f"page_hit@{k}"][-1]:
-            misses.append(t["id"])
-    return {m: mean(v) for m, v in res.items()}, misses
+    per_q = {t["id"]: rank_metrics(retriever.search(t["question"], max(k, MRR_DEPTH)), t["expected_pages"], k)
+             for t in tests if answerable(t)}
+    names = ["hit@1", f"hit@{k}", f"all_sources@{k}", f"page_hit@{k}"]
+    summary = {m: mean([r[m] for r in per_q.values()]) for m in names}
+    summary[f"MRR@{MRR_DEPTH}"] = mean([r["rr"] for r in per_q.values()])
+    misses = [qid for qid, r in per_q.items() if not r[f"page_hit@{k}"]]
+    return summary, misses
 
 
-def evaluate(k: int, rerank_model: str):
-    tests = load_tests()
+def apply_refusal_rules(t, answer, j):
+    """Score refusals in code: the judge sometimes rated an answerable refusal 5.
+
+    Answerable question + refusal -> correctness 1.
+    Unanswerable question -> correctness 5 if the answer declines, else 1 (it made something up).
+    Returns whether the answer said it does not know."""
+    if answerable(t):
+        said_dont_know = _is_refusal(answer)
+        if said_dont_know and j["correctness"] is not None:
+            j["correctness"], j["correctness_reason"] = 1, "Refusal on an answerable question (rule-based score)."
+    else:
+        # cited partial answers are fine here ("the papers give hardware but no cost [2]")
+        said_dont_know = _declines(answer)
+        if j["correctness"] is not None:
+            j["correctness"] = 5 if said_dont_know else 1
+            j["correctness_reason"] = ("Correctly declined an unanswerable question (rule-based score)."
+                                       if said_dont_know else
+                                       "Answered a question the documents cannot answer (rule-based score).")
+    return said_dont_know
+
+
+def evaluate(k: int, rerank_model: str, testset: str):
+    tests = load_tests(testset)
     retriever, gen = Retriever(rerank_model=rerank_model), Generator()
     judge = Judge(gen)
     rows = []
     for t in tests:
         hits = retriever.search(t["question"], max(k, MRR_DEPTH))
-        src_ranks = [i for i, h in enumerate(hits, 1) if h.source == t["expected_source"]]
-        first = src_ranks[0] if src_ranks else None
         top = hits[:k]
-        page_hit = any(h.source == t["expected_source"] and h.page in t["expected_pages"] for h in top)
+        m = rank_metrics(hits, t["expected_pages"], k) if answerable(t) else dict.fromkeys(
+            ["hit@1", f"hit@{k}", f"all_sources@{k}", f"page_hit@{k}", "rr", "first_rank"])
 
         try:
             answer = with_retry(lambda t=t, top=top: gen.answer(t["question"], top))
             j = judge.score(t["question"], t["reference_answer"], build_context(top), answer)
-            if _is_refusal(answer) and j["correctness"] is not None:
-                # every test question is answerable, so a refusal is never correct;
-                # enforced in code because the judge sometimes rated refusals 5
-                j["correctness"] = 1
-                j["correctness_reason"] = "Refusal on an answerable question (rule-based score)."
+            said_dont_know = apply_refusal_rules(t, answer, j)
         except Exception as e:  # one bad call should not lose the whole run
-            answer = f"GENERATION ERROR: {e}"
+            answer, said_dont_know = f"GENERATION ERROR: {e}", None
             j = {"faithfulness": None, "correctness": None,
                  "faithfulness_reason": "not judged: generation failed", "correctness_reason": ""}
         rows.append({
-            "id": t["id"], "question": t["question"], "expected_source": t["expected_source"],
-            "expected_pages": " ".join(map(str, t["expected_pages"])),
-            "hit@1": int(first == 1), f"hit@{k}": int(first is not None and first <= k),
-            f"page_hit@{k}": int(page_hit), "rr": round(1 / first, 3) if first else 0.0,
-            "first_rank": first or "",
+            "id": t["id"], "type": t["type"], "question": t["question"],
+            "expected": "; ".join(f"{s}:p{' '.join(map(str, p))}" for s, p in t["expected_pages"].items()),
+            **{key: m[key] for key in ("hit@1", f"hit@{k}", f"all_sources@{k}", f"page_hit@{k}")},
+            "rr": round(m["rr"], 3) if m["rr"] is not None else None,
+            "first_rank": m["first_rank"] or "",
             "retrieved": "; ".join(f"{h.source}:p{h.page}" for h in top),
+            "said_dont_know": None if said_dont_know is None else int(said_dont_know),
             "faithfulness": j["faithfulness"], "correctness": j["correctness"],
             "faithfulness_reason": j["faithfulness_reason"], "correctness_reason": j["correctness_reason"],
             "answer": answer, "reference_answer": t["reference_answer"],
         })
-        print(f"{t['id']}  rank={first or '-':>2}  F={j['faithfulness']}  C={j['correctness']}")
+        print(f"{t['id']} {t['type']:<13} rank={m['first_rank'] or '-':>2}  F={j['faithfulness']}  C={j['correctness']}")
     return rows
 
 
@@ -110,41 +154,75 @@ REFUSAL = re.compile(
     r"|no (specific |relevant )?information (about|on|regarding)", re.I)
 
 
+# Looser check for unanswerable questions: the answer may cite what *is* there
+# while saying the requested fact is missing.
+DECLINE = re.compile(
+    REFUSAL.pattern + r"|(not|n.t) (specified|stated|reported|mentioned|provided|given|available|disclosed)"
+    r"|(do|does) not (specify|state|report|give|disclose)|no (mention|information|data) (of|about|on)", re.I)
+
+
 def _is_refusal(answer):
     return bool(REFUSAL.search(answer[:300])) and not re.search(r"\[\d+\]", answer)
 
 
+def _declines(answer):
+    return bool(DECLINE.search(answer))
+
+
 def summarize(rows, k):
-    return {
+    ans = [r for r in rows if r["type"] != "unanswerable"]
+    unans = [r for r in rows if r["type"] == "unanswerable"]
+    s = {
         "questions": len(rows),
-        "hit@1": mean([r["hit@1"] for r in rows]),
-        f"hit@{k}": mean([r[f"hit@{k}"] for r in rows]),
-        f"page_hit@{k}": mean([r[f"page_hit@{k}"] for r in rows]),
-        f"MRR@{MRR_DEPTH}": mean([r["rr"] for r in rows]),
+        "hit@1": mean([r["hit@1"] for r in ans]),
+        f"hit@{k}": mean([r[f"hit@{k}"] for r in ans]),
+    }
+    if any(r["type"] == "multi_hop" for r in rows):
+        s[f"all_sources@{k}"] = mean([r[f"all_sources@{k}"] for r in ans])
+    s |= {
+        f"page_hit@{k}": mean([r[f"page_hit@{k}"] for r in ans]),
+        f"MRR@{MRR_DEPTH}": mean([r["rr"] for r in ans]),
         "answers with [n] citations": mean([int(bool(re.search(r"\[\d+\]", r["answer"])))
-                                            for r in rows if not _is_refusal(r["answer"])]),
-        "refusals": sum(_is_refusal(r["answer"]) for r in rows),
+                                            for r in ans if not r["said_dont_know"]]),
+        "refusals": sum(bool(r["said_dont_know"]) for r in ans),
+    }
+    if unans:
+        s["refusal recall (unanswerable)"] = mean([r["said_dont_know"] for r in unans])
+    s |= {
         "faithfulness (1-5)": mean([r["faithfulness"] for r in rows]),
         "correctness (1-5)": mean([r["correctness"] for r in rows]),
         "unscored (errors)": sum(r["faithfulness"] is None for r in rows),
     }
+    return s
+
+
+def by_type(rows, k):
+    """Per question type: count, page hit, correctness, how often it said 'I don't know'."""
+    out = {}
+    for typ in dict.fromkeys(r["type"] for r in rows):
+        rs = [r for r in rows if r["type"] == typ]
+        out[typ] = {"n": len(rs), f"page_hit@{k}": mean([r[f"page_hit@{k}"] for r in rs]),
+                    "correctness": mean([r["correctness"] for r in rs]),
+                    "dont_know": sum(bool(r["said_dont_know"]) for r in rs)}
+    return out
 
 
 def fmt(v):
     return f"{v:.3f}" if isinstance(v, float) else str(v)
 
 
-def write_report(rows, summary, k):
-    with open(EVAL_DIR / "results.csv", "w", newline="") as f:
+def write_report(rows, summary, k, suffix=""):
+    with open(EVAL_DIR / f"results{suffix}.csv", "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
         w.writeheader()
         w.writerows(rows)
 
     def score(r):
         f, c = r["faithfulness"] or 0, r["correctness"] or 0
-        return (r[f"hit@{k}"], min(f, c), f + c, r["rr"])
+        hit = 1 if r[f"hit@{k}"] is None else r[f"hit@{k}"]  # unanswerable: nothing to retrieve
+        return (min(f, c), hit, f + c, r["rr"] or 0)
     failures = [r for r in sorted(rows, key=score)
-                if not r[f"hit@{k}"] or (r["faithfulness"] or 0) <= 3 or (r["correctness"] or 0) <= 3][:3]
+                if r[f"hit@{k}"] == 0 or (r["faithfulness"] or 0) <= 3 or (r["correctness"] or 0) <= 3][:5]
     if not failures:  # still show the weakest cases so the report is informative
         failures = sorted(rows, key=score)[:3]
         fail_title = "No hard failures; weakest cases"
@@ -155,7 +233,8 @@ def write_report(rows, summary, k):
          f"Date: {date.today()}  ",
          f"Embeddings: `{config.EMBED_MODEL}` · Generator and judge: `{config.LLM_MODEL}` "
          f"(generator thinking {'on' if config.LLM_THINKING else 'off'} with no-thinking fallback, judge thinking off) · k = {k}  ",
-         f"Reranker: `{RERANK}`" + (f" over top {config.RERANK_CANDIDATES} vector candidates" if RERANK.lower() != "none" else " (vector search only)"), "",
+         f"Reranker: `{RERANK}`" + (f" over top {config.RERANK_CANDIDATES} vector candidates" if RERANK.lower() != "none" else " (vector search only)")
+         + (f" · at most {config.MAX_PER_SOURCE} chunks per paper" if config.MAX_PER_SOURCE else ""), "",
          "## Summary", "", "| Metric | Value |", "|---|---|"]
     L += [f"| {m} | {fmt(v)} |" for m, v in summary.items()]
     L += ["", "**Metric definitions.** hit@k: expected source file is among the top-k chunks. "
@@ -165,22 +244,32 @@ def write_report(rows, summary, k):
           "Both are scored 1-5 by an LLM judge.", "",
           "**Caveat.** The judge is the same model as the generator, which can bias scores upward "
           "(self-preference). Treat answer scores as indicative, not absolute.", "",
-          "## Per-question results", "",
-          f"| id | question | first rank | hit@{k} | page hit | F | C |", "|---|---|---|---|---|---|---|"]
+          ]
+    types = by_type(rows, k)
+    if len(types) > 1:
+        L += ["## By question type", "",
+              f"| type | n | page_hit@{k} | correctness (1-5) | said don't know |", "|---|---|---|---|---|"]
+        for typ, v in types.items():
+            ph = v[f"page_hit@{k}"]
+            ph = "–" if ph != ph else fmt(ph)  # NaN for unanswerable: nothing to retrieve
+            L.append(f"| {typ} | {v['n']} | {ph} | {fmt(v['correctness'])} | {v['dont_know']} |")
+        L += ["", "Unanswerable questions should all be declined; every other type should be answered.", ""]
+    L += ["## Per-question results", "",
+          f"| id | type | question | first rank | hit@{k} | page hit | F | C |", "|---|---|---|---|---|---|---|---|"]
     for r in rows:
         q = r["question"].replace("|", "/")
-        L.append(f"| {r['id']} | {q} | {r['first_rank'] or '–'} | {r[f'hit@{k}']} | "
-                 f"{r[f'page_hit@{k}']} | {r['faithfulness']} | {r['correctness']} |")
+        L.append(f"| {r['id']} | {r['type']} | {q} | {r['first_rank'] or '–'} | {'–' if r[f'hit@{k}'] is None else r[f'hit@{k}']} | "
+                 f"{'–' if r[f'page_hit@{k}'] is None else r[f'page_hit@{k}']} | {r['faithfulness']} | {r['correctness']} |")
     L += ["", f"## {fail_title}", ""]
     for r in failures:
         L += [f"### {r['id']}: {r['question']}", "",
-              f"- **Expected:** `{r['expected_source']}` p.{r['expected_pages']}",
+              f"- **Type:** {r['type']} · **Expected:** {r['expected'] or 'nothing (unanswerable)'}",
               f"- **Retrieved:** {r['retrieved']}",
               f"- **Answer:** {r['answer']}",
               f"- **Reference:** {r['reference_answer']}",
               f"- **Faithfulness {r['faithfulness']}:** {r['faithfulness_reason']}",
               f"- **Correctness {r['correctness']}:** {r['correctness_reason']}", ""]
-    (EVAL_DIR / "report.md").write_text("\n".join(L))
+    (EVAL_DIR / f"report{suffix}.md").write_text("\n".join(L))
 
 
 RERANK = config.RERANK_MODEL
@@ -194,17 +283,25 @@ def main():
                     help="cross-encoder name, or 'none' for vector search only")
     ap.add_argument("--retrieval-only", nargs="*", metavar="MODEL",
                     help="compare retrieval metrics (no LLM) for 'none' and the given rerankers")
+    ap.add_argument("--max-per-source", type=int, nargs="*", metavar="N",
+                    help="with --retrieval-only: also compare these per-paper caps (0 = no cap)")
+    ap.add_argument("--testset", default="testset",
+                    help="file name in eval/ without .jsonl, e.g. testset_hard")
     args = ap.parse_args()
     k = args.k
+    suffix = args.testset.removeprefix("testset")  # testset_hard -> report_hard.md
 
     if args.retrieval_only is not None:
-        tests = load_tests()
-        configs = ["none"] + [m for m in args.retrieval_only if m.lower() != "none"]
+        tests = load_tests(args.testset)
+        models = ["none"] + [m for m in args.retrieval_only if m.lower() != "none"]
+        caps = args.max_per_source or [config.MAX_PER_SOURCE]
         table = {}
-        for m in configs:
-            t0 = time.time()
-            summary, misses = retrieval_metrics(Retriever(rerank_model=m), tests, k)
-            table[m] = (summary, misses, (time.time() - t0) / len(tests))
+        for m in models:
+            for cap in caps:
+                t0 = time.time()
+                summary, misses = retrieval_metrics(Retriever(rerank_model=m, max_per_source=cap), tests, k)
+                label = m if len(caps) == 1 else f"{m}, max {cap or '∞'}/paper"
+                table[label] = (summary, misses, (time.time() - t0) / len(tests))
         metrics = list(next(iter(table.values()))[0])
         print("\n| Retriever | " + " | ".join(metrics) + " | s/question | page misses |")
         print("|---" * (len(metrics) + 3) + "|")
@@ -213,13 +310,13 @@ def main():
         return
 
     RERANK = args.rerank_model
-    rows = evaluate(k, RERANK)
+    rows = evaluate(k, RERANK, args.testset)
     summary = summarize(rows, k)
-    write_report(rows, summary, k)
+    write_report(rows, summary, k, suffix)
     print("\n| Metric | Value |\n|---|---|")
     for m, v in summary.items():
         print(f"| {m} | {fmt(v)} |")
-    print(f"\nWrote {EVAL_DIR / 'report.md'} and results.csv")
+    print(f"\nWrote {EVAL_DIR / f'report{suffix}.md'} and results{suffix}.csv")
 
 
 if __name__ == "__main__":
