@@ -25,6 +25,8 @@ RERANK_MODEL = os.getenv("RERANK_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2")
 RERANK_CANDIDATES = 50
 # Cap on chunks per paper in the final top-k (0 = no cap). Without a cap the reranker
 # can fill all k slots from one paper, which starves questions that need two papers.
+# Split multi-paper questions into one search per paper (one extra LLM call per question).
+DECOMPOSE = os.getenv("DECOMPOSE", "0") == "1"
 MAX_PER_SOURCE = int(os.getenv("MAX_PER_SOURCE", "0"))
 # Thinking on gives better grounded answers and keeps [n] citations (eval showed
 # thinking-off answers dropped citations and misread context). Reasoning can still

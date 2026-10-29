@@ -51,6 +51,9 @@ class FakeRetriever:
     def search(self, question, k):
         return self.results[question][:k]
 
+    def search_many(self, queries, k, question=None):
+        return self.search(queries[0], k)
+
 
 def test_retrieval_metrics():
     tests = [

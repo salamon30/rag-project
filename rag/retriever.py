@@ -14,6 +14,8 @@ from sentence_transformers import CrossEncoder, SentenceTransformer
 from ingest import config
 from ingest.store import get_collection
 
+from .decompose import interleave
+
 
 @dataclass
 class Hit:
@@ -79,3 +81,17 @@ class Retriever:
         for h, s in zip(hits, scores, strict=True):
             h.score = float(s)
         return diversify(sorted(hits, key=lambda h: h.score, reverse=True), k, self.max_per_source)
+
+    def search_many(self, queries: list[str], k: int = config.TOP_K,
+                    candidates: int = config.RERANK_CANDIDATES, question: str | None = None) -> list[Hit]:
+        """Search once per sub-query and interleave, so each item gets a share of the top k.
+
+        A split is kept only if the sub-queries' top hits come from at least two papers.
+        Otherwise it was a split into aspects of one paper, which only takes slots away
+        from the best passages, so the original question is searched instead."""
+        if len(queries) == 1:
+            return self.search(queries[0], k, candidates)
+        results = [self.search(q, k, candidates) for q in queries]
+        if len({r[0].source for r in results if r}) < 2:
+            return self.search(question or queries[0], k, candidates)
+        return interleave(results, k)
