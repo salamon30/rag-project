@@ -11,7 +11,7 @@ Built end to end in Python: PDF ingestion, two-stage retrieval (vector search + 
 ## Highlights
 
 - **Grounded answers with citations.** Every claim is tied to a numbered passage `[n]`, shown with file, page and similarity score.
-- **Measured, not assumed.** Two test sets (40 questions, including unanswerable, false-premise and multi-paper ones) score retrieval (hit@k, MRR) and answers (LLM-as-judge faithfulness and correctness).
+- **Measured, not assumed.** Three test sets (60 questions, including unanswerable, false-premise, multi-paper and a held-out set never tuned on) score retrieval (hit@k, MRR) and answers (LLM-as-judge faithfulness and correctness).
 - **Refuses instead of hallucinating.** When retrieval misses, the model declines rather than inventing an answer.
 - **Two-stage retrieval.** A cross-encoder reranker re-scores the vector-search candidates. It eliminated every refusal in the test set.
 - **Debugged with data.** Several design choices below were changed because the evaluation exposed a problem.
@@ -62,6 +62,30 @@ Correctness 1-5. Reports: [current](eval/report_hard.md) · [without decompositi
 1. **The prompt was too strict.** The model refused false-premise questions because the passages did not explain *why ResNet-50 was chosen*. One added rule ("if the passages contradict the question's assumption, correct it with citations") fixed all four without making it answer any unanswerable question.
 2. **The reranker can crowd out a second paper.** For multi-paper questions it sometimes filled all five slots from one paper, and the model then correctly said it lacked the other half. A fixed cap on chunks per paper fixed that but pushed the right page out for single-paper questions (page_hit@5 0.90 → 0.70), so it stays off ([diversity_comparison.md](eval/diversity_comparison.md)).
 3. **Query decomposition fixed it per question.** An LLM call splits a comparison into one search per paper, and the results are interleaved. The first prompt split 35 of 40 questions, including single-paper ones ("U-Net challenge" + "U-Net image types"), and page hits on the original set fell to 0.65. Rather than tuning the prompt further, the retriever now checks each split: it is kept only if the sub-queries' best hits come from different papers. Multi-paper retrieval (all papers in top 5) rose from 0.79 to 0.93 and multi-paper correctness from 3.7 to 5.0; the original set's answers are unchanged.
+
+### Held-out test set
+
+Every change above was tuned while looking at the first two sets, so their scores could be optimistic. [20 new questions](eval/testset_heldout.jsonl) were written afterwards and run once, with no changes to the code or prompts. Each answer was checked against the PDF text, with page numbers.
+
+| Question type | Hard set (tuned on) | Held-out set |
+|---|---|---|
+| Single paper (10) | – | 4.8 |
+| Paraphrase (3) | 5.0 | 5.0 |
+| Unanswerable, declined (2) | 5.0 | 5.0 ✅ |
+| False premise (2) | 4.0 | 5.0 |
+| Multi-paper (3) | 5.0 | **2.3** |
+| **All 20** | 4.8 | **4.5** |
+
+Correctness 1-5. Retrieval on the held-out set: hit@5 1.00, page_hit@5 0.94, MRR@10 0.94. [Full report](eval/report_heldout.md).
+
+**What the held-out set found.**
+1. **Most of the gains generalise.** Single-paper, paraphrase, unanswerable and false-premise questions score 4.8-5.0 on questions the system was never tuned on. The false-premise prompt rule holds up.
+2. **Multi-paper questions do not.** The perfect 5.0 on the hard set was partly fitted to those six questions. Each held-out failure has a different cause:
+    - **A chained question (x16).** *"Which model did the GPT-4 study cite but not test, and how was it adapted?"* The second search depends on the answer to the first, and decomposition only splits side-by-side comparisons. No Med-PaLM page was retrieved, so the model declined.
+    - **A chunk boundary (x14).** The CheXNet passage in the top 5 ends at "We train", one sentence before the batch size and learning rate. The overlapping next chunk has them but ranked lower, so the comparison came out half empty.
+    - **A misread number (x15).** The model said MedRAG uses 4 snippets by default; the paper says 32, on a page that was not retrieved.
+3. **The judge missed a wrong number.** Re-scored after its reference was corrected, x15 got 5/5 four times in a row, each time accepting "4 snippets" against a reference of 32. It is scored by hand (3/5) and marked as manual in the report.
+4. **The test set had a bug too.** The x15 reference only gave RAG's training setting (5 or 10 documents). The paper's appendix also reports 15 and 50 documents at test time, which the model had correctly cited. The reference was fixed and the saved answer re-scored without regenerating it.
 
 ## Architecture
 
@@ -165,8 +189,9 @@ Ten open-access arXiv papers on medical AI and RAG: the original RAG paper, a RA
 ## Limitations and next steps
 
 - **Same model as generator and judge.** This can inflate answer scores through self-preference. A different judge model would be more reliable.
-- **The prompt fix was tuned and measured on the same hard set.** A fresh, held-out set is needed to confirm it generalises.
-- **The judge is lenient on partial answers.** It gave 5/5 to a multi-paper answer that covered only one of the two papers (h15). Answer scores are spot-checked by hand, and refusals are scored by rule rather than by the judge.
+- **Multi-paper questions are the weak spot.** They score 2.3 on the held-out set. Chained questions, where one search depends on another's answer, would need iterative retrieval: search, read, then search again. Adding the neighbouring chunk to each hit could fix boundary cuts like x14.
+- **Small held-out set.** 20 questions, 3 of them multi-paper, so one answer moves a type's average a lot.
+- **The judge is lenient on partial answers and can miss wrong numbers.** It gave 5/5 to a multi-paper answer that covered only one of the two papers (h15), and 5/5 to an answer with a wrong snippet count (x15). Answer scores are spot-checked by hand, and refusals are scored by rule rather than by the judge.
 - **Run-to-run variation.** LLM answers and decomposition can differ between identical runs; single-question changes should be checked against the retrieved passages before they are attributed to a code change.
 - **Decomposition cost.** One extra LLM call and up to three searches per question (about 1.5 s more on a laptop). `DECOMPOSE=0` turns it off.
 - **Latency.** Reranking adds about 0.6 s per question on a laptop CPU. Hybrid BM25 + dense search could reduce the candidate set further.
