@@ -51,6 +51,9 @@ class FakeRetriever:
     def search(self, question, k):
         return self.results[question][:k]
 
+    def search_many(self, queries, k, question=None):
+        return self.search(queries[0], k)
+
 
 def test_retrieval_metrics():
     tests = [
@@ -117,6 +120,8 @@ def test_original_testset_has_no_new_metrics():
     "The documents do not state how much it cost.",
     "The paper reports 20 A100 GPUs [2], but the monetary cost is not reported.",
     "I don't know based on the provided documents.",
+    # regression: a correct decline the first rule missed (h02)
+    "The test set was annotated at Stanford [3]. No external hospital validation or associated AUROC is reported.",
 ])
 def test_declines_accepts_cited_partial_answers(answer):
     assert _declines(answer)
@@ -181,3 +186,17 @@ def test_hard_set_covers_every_new_type():
     types = {t["type"] for t in load_tests("testset_hard")}
     assert types == TYPES - {"single"}
     assert re.fullmatch(r"h\d\d", load_tests("testset_hard")[0]["id"])
+
+
+def test_rescore_fixes_rule_and_reports_changes():
+    from eval.run_eval import rescore
+    rows = [
+        {"id": "u1", "type": "unanswerable", "answer": "No external validation is reported [1].",
+         "said_dont_know": 0, "correctness": 1, "correctness_reason": "old"},
+        {"id": "a1", "type": "single", "answer": "Yes [1].", "said_dont_know": 0, "correctness": 4,
+         "correctness_reason": "judge"},
+        {"id": "e1", "type": "single", "answer": "GENERATION ERROR: x", "said_dont_know": None,
+         "correctness": None, "correctness_reason": ""},
+    ]
+    assert rescore(rows) == ["u1"]
+    assert rows[0]["correctness"] == 5 and rows[1]["correctness"] == 4  # judge scores are kept

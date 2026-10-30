@@ -1,8 +1,8 @@
 # RAG evaluation report
 
-Date: 2026-10-28  
+Date: 2026-10-29  
 Embeddings: `BAAI/bge-small-en-v1.5` · Generator and judge: `nvidia/nemotron-3.5-lightning-30b-a3b` (generator thinking on with no-thinking fallback, judge thinking off) · k = 5  
-Reranker: `cross-encoder/ms-marco-MiniLM-L-6-v2` over top 50 vector candidates
+Reranker: `cross-encoder/ms-marco-MiniLM-L-6-v2` over top 50 vector candidates · query decomposition on
 
 ## Summary
 
@@ -11,9 +11,9 @@ Reranker: `cross-encoder/ms-marco-MiniLM-L-6-v2` over top 50 vector candidates
 | questions | 20 |
 | hit@1 | 0.800 |
 | hit@5 | 1.000 |
-| page_hit@5 | 0.900 |
-| MRR@10 | 0.877 |
-| answers with [n] citations | 0.950 |
+| page_hit@5 | 0.800 |
+| MRR@10 | 0.885 |
+| answers with [n] citations | 1.000 |
 | refusals | 0 |
 | faithfulness (1-5) | 5.000 |
 | correctness (1-5) | 5.000 |
@@ -27,10 +27,10 @@ Reranker: `cross-encoder/ms-marco-MiniLM-L-6-v2` over top 50 vector candidates
 
 | id | type | question | first rank | hit@5 | page hit | F | C |
 |---|---|---|---|---|---|---|---|
-| q01 | single | What are the two RAG model variants proposed by Lewis et al., and how do they differ? | 3 | 1 | 1 | 5 | 5 |
+| q01 | single | What are the two RAG model variants proposed by Lewis et al., and how do they differ? | 2 | 1 | 0 | 5 | 5 |
 | q02 | single | How was Wikipedia split to build the document index in the original RAG paper, and how many documents resulted? | 2 | 1 | 1 | 5 | 5 |
 | q03 | single | Which pre-trained model is used as the generator in the original RAG architecture? | 1 | 1 | 1 | 5 | 5 |
-| q04 | single | How can a retrieval-augmented model's world knowledge be updated without retraining it? | 1 | 1 | 1 | 5 | 5 |
+| q04 | single | How can a retrieval-augmented model's world knowledge be updated without retraining it? | 1 | 1 | 0 | 5 | 5 |
 | q05 | single | What neural network architecture does CheXNet use? | 1 | 1 | 1 | 5 | 5 |
 | q06 | single | How large is the ChestX-ray14 dataset used to train CheXNet? | 1 | 1 | 1 | 5 | 5 |
 | q07 | single | How did CheXNet's F1 score for pneumonia detection compare to the radiologists? | 1 | 1 | 1 | 5 | 5 |
@@ -54,31 +54,30 @@ Reranker: `cross-encoder/ms-marco-MiniLM-L-6-v2` over top 50 vector candidates
 
 - **Type:** single · **Expected:** med_palm_2022.pdf:p1 2
 - **Retrieved:** med_palm2_2023.pdf:p3; med_palm2_2023.pdf:p1; gpt4_medical_challenge_2023.pdf:p3; med_palm2_2023.pdf:p5; med_palm_2022.pdf:p8
-- **Answer:** MultiMedQA is described in [1] as "a diverse benchmark for medical question-answering spanning medical exams, consumer health, and medical research." It includes multiple-choice datasets (MedQA, MedMCQA, PubMedQA, MMLU clinical topics) and long-form question sets sampled from sources such as HealthSearchQA, LiveQA, and MedicationQA [1]. Alongside MultiMedQA, two new adversarial long-form datasets were introduced [1][2], including 240 long-form "adversarial" questions designed to probe LLM limitations [2].
+- **Answer:** MultiMedQA is introduced as "a diverse benchmark for medical question-answering spanning medical exams, consumer health, and medical research" [1]. The new dataset introduced with it is HealthSearchQA, a 3375-question open-domain consumer medical QA dataset curated from search engine queries using seed medical conditions, published as "(Ours)" [5].
 - **Reference:** A benchmark combining six existing medical QA datasets (MedQA, MedMCQA, PubMedQA, LiveQA, MedicationQA, MMLU clinical topics) plus the new HealthSearchQA dataset of commonly searched health questions.
-- **Faithfulness 5:** All claims in the answer are supported by the context, specifically citing the definition of MultiMedQA and the inclusion of HealthSearchQA.
-- **Correctness 5:** The answer accurately matches the reference answer, correctly identifying MultiMedQA as the benchmark and HealthSearchQA as the new dataset.
+- **Faithfulness 5:** The answer correctly identifies MultiMedQA and HealthSearchQA, both explicitly mentioned in the context.
+- **Correctness 5:** The answer accurately matches the reference answer's key facts about MultiMedQA combining existing datasets and introducing HealthSearchQA.
 
 ### q01: What are the two RAG model variants proposed by Lewis et al., and how do they differ?
 
 - **Type:** single · **Expected:** rag_lewis_2020.pdf:p3
-- **Retrieved:** medrag_benchmark_2024.pdf:p2; medrag_benchmark_2024.pdf:p2; rag_lewis_2020.pdf:p3; rag_survey_gao_2023.pdf:p17; rag_survey_gao_2023.pdf:p12
-- **Answer:** The two RAG model variants proposed by Lewis et al. are **RAG-Sequence** and **RAG-Token**, as described in passage [3].
+- **Retrieved:** medrag_benchmark_2024.pdf:p2; rag_lewis_2020.pdf:p8; medrag_benchmark_2024.pdf:p2; rag_survey_gao_2023.pdf:p5; rag_survey_gao_2023.pdf:p17
+- **Answer:** The two RAG model variants proposed by Lewis et al. (2020) are **RAG-Token** and **RAG-Sequence** [2].  
 
-- **RAG-Sequence** uses the same retrieved document to predict each target token. Formally, the probability is marginalized over a single document z for the entire sequence: pRAG-Sequence(y|x) ≈ ∑z∈top-k(p(·|x)) pη(z|x) ∏ᵢ pθ(yi|x,z,y₁:ᵢ⁻¹).
+- **RAG-Token**: Performance peaks when retrieving 10 documents at test time. Retrieving more documents improves Rouge-L but at the expense of Bleu-1, indicating a metric trade-off.  
+- **RAG-Sequence**: Performance monotonically improves as more documents are retrieved, with less pronounced effects on the Bleu-1/Rouge-L trade-off compared to RAG-Token [2].  
 
-- **RAG-Token** can predict each target token based on a different document, allowing the generator to select content from several documents when producing an answer. Formally, the probability marginalizes separately for each token: pRAG-Token(y|x) ≈ ∏ᵢ ∑z∈top-k(p(·|x)) pη(z|x) pθ(yi|x,z,y₁:ᵢ⁻¹).
-
-The key difference is that RAG-Sequence treats the retrieved document as a single latent variable for the complete sequence, while RAG-Token draws a potentially different latent document for each target token, enabling the model to draw from multiple documents during generation.
+In short, the variants differ in how retrieved document quantity affects their evaluation metrics and optimal retrieval count. [2]
 - **Reference:** RAG-Sequence uses the same retrieved document to generate the whole output sequence; RAG-Token can use a different retrieved document for each target token.
-- **Faithfulness 5:** The answer accurately summarizes the two RAG variants and their differences as described in the context.
-- **Correctness 5:** The answer correctly identifies RAG-Sequence and RAG-Token and accurately describes how they differ in document usage.
+- **Faithfulness 5:** All claims in the answer are directly supported by the provided context, specifically citing the performance differences between RAG-Token and RAG-Sequence regarding document retrieval.
+- **Correctness 5:** The answer accurately identifies the two variants (RAG-Token and RAG-Sequence) and correctly states their key differences in retrieval behavior and metric trade-offs as described in the reference answer and context.
 
 ### q02: How was Wikipedia split to build the document index in the original RAG paper, and how many documents resulted?
 
 - **Type:** single · **Expected:** rag_lewis_2020.pdf:p4
 - **Retrieved:** rag_survey_gao_2023.pdf:p3; rag_lewis_2020.pdf:p4; rag_lewis_2020.pdf:p8; rag_lewis_2020.pdf:p7; rag_survey_gao_2023.pdf:p8
-- **Answer:** According to the original RAG paper (Lewis et al. 2020), each Wikipedia article was split into disjoint 100-word chunks, resulting in a total of 21M documents [2].
+- **Answer:** According to the original RAG paper (Lewis et al. 2020), each Wikipedia article was split into disjoint 100-word chunks, resulting in a total of 21M documents. This setup is described in passage [2].
 - **Reference:** The December 2018 Wikipedia dump was split into disjoint 100-word chunks, giving about 21 million documents, indexed with FAISS.
-- **Faithfulness 5:** The answer correctly states that Wikipedia articles were split into 100-word chunks resulting in 21M documents, which is fully supported by the context.
-- **Correctness 5:** The answer matches the reference answer exactly, stating the 100-word chunk split and 21M document count.
+- **Faithfulness 5:** The answer accurately states that Wikipedia articles were split into 100-word chunks resulting in 21M documents, fully supported by the context.
+- **Correctness 5:** The answer exactly matches the reference answer regarding the chunking method and document count.

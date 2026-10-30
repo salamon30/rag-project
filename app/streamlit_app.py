@@ -37,6 +37,7 @@ with st.sidebar:
     st.divider()
     st.caption(f"Embeddings: `{config.EMBED_MODEL}`")
     st.caption(f"Reranker: `{config.RERANK_MODEL}`")
+    st.caption(f"Query decomposition: {'on' if config.DECOMPOSE else 'off'}")
     st.caption(f"LLM: `{config.LLM_MODEL}`")
     summary = eval_summary()
     if summary:
@@ -77,6 +78,8 @@ if question:
 
     st.subheader("Answer")
     st.markdown(result.answer)
+    if len(result.queries) > 1:
+        st.caption("Split into one search per paper: " + " · ".join(f"“{q}”" for q in result.queries))
 
     st.subheader("Sources")
     for i, h in enumerate(result.hits, start=1):

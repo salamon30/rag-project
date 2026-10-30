@@ -100,3 +100,56 @@ def test_search_applies_cap_after_reranking():
     r.max_per_source = 1
     hits = r.search("q", k=3, candidates=8)
     assert len({h.source for h in hits}) == 3
+
+
+def test_search_many_with_one_query_is_plain_search():
+    r = make()
+    assert [h.text for h in r.search_many(["q"], k=3)] == [h.text for h in r.search("q", k=3)]
+
+
+def test_search_many_runs_one_search_per_query():
+    r = make()
+    r.search_many(["first", "second"], k=4)
+    assert r.model.seen[:2] == [config.QUERY_PREFIX + "first", config.QUERY_PREFIX + "second"]
+
+
+class TwoPaperCollection(FakeCollection):
+    """Query 'about a' finds paper a, anything else finds paper b."""
+
+    def __init__(self):
+        super().__init__()
+        self.next_source = "b"
+
+    def query(self, query_embeddings, n_results):
+        res = super().query(query_embeddings, n_results)
+        res["metadatas"] = [[{"source": f"{self.next_source}.pdf", "page": i} for i in range(1, n_results + 1)]]
+        return res
+
+
+def test_search_many_drops_split_when_all_parts_hit_one_paper():
+    r = make()  # FakeCollection: every query's top hit is s1.pdf
+    r.model.seen.clear()
+    r.search_many(["aspect one", "aspect two"], k=4, question="original")
+    assert r.model.seen[-1] == config.QUERY_PREFIX + "original"
+
+
+def test_search_many_keeps_split_across_papers():
+    r = make()
+    col = TwoPaperCollection()
+    r.collection = col
+    sources = iter(["a", "b"])
+    orig_search = r.search
+
+    def search(q, k, candidates=50):
+        col.next_source = next(sources)
+        return orig_search(q, k, candidates)
+
+    r.search = search
+    hits = r.search_many(["about a", "about b"], k=4, question="original")
+    assert [h.source for h in hits] == ["a.pdf", "b.pdf", "a.pdf", "b.pdf"]
+
+
+def test_last_searches_records_what_really_ran():
+    r = make()
+    r.search_many(["aspect one", "aspect two"], k=3, question="original")
+    assert r.last_searches == ["original"]  # split dropped: one paper
