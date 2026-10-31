@@ -87,7 +87,7 @@ if question:
             label = (f"[{i}] {h.source} · page {h.page} · relevance {h.score:.2f}"
                      f" · vector rank {h.vector_rank}")
         else:
-            label = f"[{i}] {h.source} · page {h.page} · similarity {h.score:.3f}"
+            label = f"[{i}] {h.source} · page {h.page} · relevance score {h.score:.3f}"
         if show_text:
             with st.expander(label):
                 st.text(h.text)

@@ -2,6 +2,13 @@
 
 [![CI](https://github.com/salamon30/rag-project/actions/workflows/ci.yml/badge.svg)](https://github.com/salamon30/rag-project/actions/workflows/ci.yml)
 
+> **At a glance**
+>
+> - **What:** ask questions about a set of PDFs and get answers that cite the exact passage and page, or "I don't know" when the documents do not say.
+> - **Results:** right page in the top 5 rose from 0.45 to 0.90 with a reranker; answer correctness 5.0 / 4.8 / 4.5 (1-5) on the original, hard and held-out test sets; 72 offline unit tests in CI.
+> - **Stack:** Python 3.11 · pypdf · bge-small embeddings · ChromaDB · cross-encoder reranker · NVIDIA NIM (Nemotron) · Streamlit · pytest + GitHub Actions.
+> - **Run:** `pip install -r requirements.txt`, set `NVIDIA_API_KEY`, then `./scripts/download_data.sh`, `python -m ingest.run --reset` and `streamlit run app/streamlit_app.py` ([full steps](#quickstart)).
+
 Ask questions about medical-AI research papers and get answers that cite the exact passage and page they came from. The system says *"I don't know"* instead of guessing when the retrieved text does not contain the answer.
 
 Built end to end in Python: PDF ingestion, two-stage retrieval (vector search + cross-encoder reranker), grounded generation, a measured evaluation suite and a web UI.
@@ -10,7 +17,7 @@ Built end to end in Python: PDF ingestion, two-stage retrieval (vector search + 
 
 ## Highlights
 
-- **Grounded answers with citations.** Every claim is tied to a numbered passage `[n]`, shown with file, page and similarity score.
+- **Grounded answers with citations.** Every claim is tied to a numbered passage `[n]`, shown with file, page and relevance score.
 - **Measured, not assumed.** Three test sets (60 questions, including unanswerable, false-premise, multi-paper and a held-out set never tuned on) score retrieval (hit@k, MRR) and answers (LLM-as-judge faithfulness and correctness).
 - **Refuses instead of hallucinating.** When retrieval misses, the model declines rather than inventing an answer.
 - **Two-stage retrieval.** A cross-encoder reranker re-scores the vector-search candidates. It eliminated every refusal in the test set.
@@ -196,3 +203,7 @@ Ten open-access arXiv papers on medical AI and RAG: the original RAG paper, a RA
 - **Decomposition cost.** One extra LLM call and up to three searches per question (about 1.5 s more on a laptop). `DECOMPOSE=0` turns it off.
 - **Latency.** Reranking adds about 0.6 s per question on a laptop CPU. Hybrid BM25 + dense search could reduce the candidate set further.
 - **Per-page chunking** keeps citations exact but splits passages that cross page boundaries.
+
+## License
+
+MIT, see [LICENSE](LICENSE).

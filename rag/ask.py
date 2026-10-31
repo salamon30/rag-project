@@ -18,7 +18,7 @@ def main():
     r = RagPipeline().ask(args.question, args.k)
     print(f"\nQ: {r.question}\n\nA: {r.answer}\n\nSources:")
     for i, h in enumerate(r.hits, start=1):
-        print(f"  [{i}] {h.source} p.{h.page}  (sim {h.score:.3f})")
+        print(f"  [{i}] {h.source} p.{h.page}  (relevance score {h.score:.3f})")
         if args.show_context:
             print("      " + h.text[:300].replace("\n", " ") + "...")
 
