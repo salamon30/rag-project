@@ -96,6 +96,11 @@ Correctness 1-5. Retrieval on the held-out set: hit@5 1.00, page_hit@5 0.94, MRR
 
 ## Architecture
 
+![Animated pipeline: ingestion runs once; each question is decomposed, embedded, searched in ChromaDB, reranked to the top 5 chunks and answered by the LLM with citations](docs/architecture.svg)
+
+<details>
+<summary>Text version of the diagram (with evaluation)</summary>
+
 ```mermaid
 flowchart LR
     subgraph Ingestion
@@ -119,6 +124,8 @@ flowchart LR
         R --> J[LLM judge<br/>faithfulness, correctness]
     end
 ```
+
+</details>
 
 | Component | Choice |
 |---|---|

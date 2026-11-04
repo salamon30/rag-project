@@ -1,0 +1,104 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 430" width="1000" height="430" font-family="-apple-system, Segoe UI, Helvetica, Arial, sans-serif">
+  <title>RAG pipeline: ingestion once, then every question flows through search, reranking and a grounded LLM answer</title>
+  <style>
+    .bg { fill: #ffffff; }
+    .box { fill: #f6f8fa; stroke: #d0d7de; stroke-width: 1.5; }
+    .db { fill: #ddf4ff; stroke: #54aeff; }
+    .rr { fill: #fff8c5; stroke: #d4a72c; }
+    .ans { fill: #dafbe1; stroke: #4ac26b; }
+    .t { fill: #1f2328; font-size: 14px; font-weight: 600; text-anchor: middle; }
+    .s { fill: #59636e; font-size: 11.5px; text-anchor: middle; }
+    .lab { fill: #59636e; font-size: 12px; font-weight: 700; letter-spacing: 1px; }
+    .flow { fill: none; stroke: #8c959f; stroke-width: 2; stroke-dasharray: 6 5; animation: flow 1s linear infinite; }
+    .dot { fill: #0969da; opacity: .9; }
+    .dot2 { fill: #8250df; opacity: .9; }
+    @keyframes flow { to { stroke-dashoffset: -11; } }
+    @media (prefers-color-scheme: dark) {
+      .bg { fill: #0d1117; }
+      .box { fill: #161b22; stroke: #3d444d; }
+      .db { fill: #0c2d6b; stroke: #388bfd; }
+      .rr { fill: #3b2e00; stroke: #bb8009; }
+      .ans { fill: #0f3d1d; stroke: #2ea043; }
+      .t { fill: #f0f6fc; }
+      .s, .lab { fill: #9198a1; }
+      .flow { stroke: #656c76; }
+      .dot { fill: #4493f8; }
+      .dot2 { fill: #ab7df8; }
+    }
+  </style>
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#8c959f"/>
+    </marker>
+  </defs>
+  <rect class="bg" width="1000" height="430" rx="10"/>
+
+  <text class="lab" x="12" y="28">INGESTION · runs once</text>
+  <text class="lab" x="12" y="178">QUERY · every question</text>
+
+  <!-- connectors -->
+  <g class="flow" marker-end="url(#arr)">
+    <path d="M170,70 H213"/><path d="M375,70 H418"/><path d="M580,70 H623"/><path d="M785,70 H828"/>
+    <path d="M170,220 H213"/><path d="M375,220 H418"/>
+    <path d="M580,220 H870 V102"/>
+    <path d="M950,100 V305 H90 V338"/>
+    <path d="M170,370 H213"/><path d="M375,370 H418"/><path d="M580,370 H623"/><path d="M785,370 H828"/>
+  </g>
+  <text class="s" x="725" y="212">search</text>
+  <text class="s" x="520" y="298">50 nearest chunks</text>
+
+  <!-- row 1: ingestion -->
+  <rect class="box" x="10" y="40" width="160" height="60" rx="8"/>
+  <rect class="box" x="215" y="40" width="160" height="60" rx="8"/>
+  <rect class="box" x="420" y="40" width="160" height="60" rx="8"/>
+  <rect class="box" x="625" y="40" width="160" height="60" rx="8"/>
+  <rect class="box db" x="830" y="40" width="160" height="60" rx="8"/>
+
+  <!-- row 2: query -->
+  <rect class="box" x="10" y="190" width="160" height="60" rx="8"/>
+  <rect class="box" x="215" y="190" width="160" height="60" rx="8"/>
+  <rect class="box" x="420" y="190" width="160" height="60" rx="8"/>
+
+  <!-- row 3: rank and answer -->
+  <rect class="box" x="10" y="340" width="160" height="60" rx="8"/>
+  <rect class="box rr" x="215" y="340" width="160" height="60" rx="8"/>
+  <rect class="box" x="420" y="340" width="160" height="60" rx="8"/>
+  <rect class="box" x="625" y="340" width="160" height="60" rx="8"/>
+  <rect class="box ans" x="830" y="340" width="160" height="60" rx="8"/>
+
+  <!-- moving dots -->
+  <circle class="dot2" r="7">
+    <animateMotion dur="4s" repeatCount="indefinite" path="M90,70 H910"/>
+  </circle>
+  <circle class="dot" r="7">
+    <animateMotion dur="8s" repeatCount="indefinite" path="M90,220 H870 V70 H950 V305 H90 V370 H910"/>
+  </circle>
+  <g>
+    <text class="t" x="90" y="66">PDFs</text>
+    <text class="s" x="90" y="84">10 papers</text>
+    <text class="t" x="295" y="66">Page text</text>
+    <text class="s" x="295" y="84">pypdf, page numbers kept</text>
+    <text class="t" x="500" y="66">Chunks</text>
+    <text class="s" x="500" y="84">500 tokens, 75 overlap</text>
+    <text class="t" x="705" y="66">Embeddings</text>
+    <text class="s" x="705" y="84">bge-small-en-v1.5</text>
+    <text class="t" x="910" y="66">ChromaDB</text>
+    <text class="s" x="910" y="84">542 chunks</text>
+    <text class="t" x="90" y="216">Question</text>
+    <text class="s" x="90" y="234">from the user</text>
+    <text class="t" x="295" y="216">Decompose</text>
+    <text class="s" x="295" y="234">one search per paper</text>
+    <text class="t" x="500" y="216">Embed query</text>
+    <text class="s" x="500" y="234">bge query prefix</text>
+    <text class="t" x="90" y="366">Top 50</text>
+    <text class="s" x="90" y="384">candidates</text>
+    <text class="t" x="295" y="366">Reranker</text>
+    <text class="s" x="295" y="384">cross-encoder MiniLM</text>
+    <text class="t" x="500" y="366">Top 5 chunks</text>
+    <text class="s" x="500" y="384">+ paper and page</text>
+    <text class="t" x="705" y="366">LLM</text>
+    <text class="s" x="705" y="384">NVIDIA NIM, grounded</text>
+    <text class="t" x="910" y="366">Answer [1][2]</text>
+    <text class="s" x="910" y="384">or "I don't know"</text>
+  </g>
+</svg>
