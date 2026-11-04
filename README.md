@@ -115,7 +115,7 @@ flowchart LR
         L --> R[Answer with citations<br/>or refusal]
     end
     subgraph Evaluation
-        T[2 test sets<br/>40 Q + references] --> M[hit@k, all_sources@k, MRR]
+        T["3 test sets<br/>60 Q + references"] --> M["hit@k, page_hit@k,<br/>all_sources@k, MRR"]
         R --> J[LLM judge<br/>faithfulness, correctness]
     end
 ```
