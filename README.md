@@ -13,7 +13,9 @@ Ask questions about medical-AI research papers and get answers that cite the exa
 
 Built end to end in Python: PDF ingestion, two-stage retrieval (vector search + cross-encoder reranker), grounded generation, a measured evaluation suite and a web UI.
 
-![Streamlit UI answering a question with cited sources](docs/screenshot.png)
+![Demo: a question is typed into the Streamlit UI, the answer cites passages [1][2][4] and the sources list shows paper, page and relevance score](docs/demo.gif)
+
+<sub>The wait for the answer (about 30 s) is cut from the recording. [Still screenshot](docs/screenshot.png).</sub>
 
 ## Highlights
 
