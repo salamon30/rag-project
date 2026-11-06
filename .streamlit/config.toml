@@ -1,0 +1,9 @@
+[server]
+# The default watcher walks every imported module (transformers has hundreds) and logs noise
+fileWatcherType = "none"
+
+[client]
+toolbarMode = "minimal"
+
+[browser]
+gatherUsageStats = false

@@ -5,7 +5,7 @@
 > **At a glance**
 >
 > - **What:** ask questions about a set of PDFs and get answers that cite the exact passage and page, or "I don't know" when the documents do not say.
-> - **Results:** right page in the top 5 rose from 0.45 to 0.90 with a reranker; answer correctness 5.0 / 4.8 / 4.5 (1-5) on the original, hard and held-out test sets; 72 offline unit tests in CI.
+> - **Results:** right page in the top 5 rose from 0.45 to 0.90 with a reranker; answer correctness 5.0 / 4.8 / 4.5 (1-5) on the original, hard and held-out test sets; 75 offline unit tests in CI.
 > - **Stack:** Python 3.11 · pypdf · bge-small embeddings · ChromaDB · cross-encoder reranker · NVIDIA NIM (Nemotron) · Streamlit · pytest + GitHub Actions.
 > - **Run:** `pip install -r requirements.txt`, set `NVIDIA_API_KEY`, then `./scripts/download_data.sh`, `python -m ingest.run --reset` and `streamlit run app/streamlit_app.py` ([full steps](#quickstart)).
 
@@ -177,11 +177,24 @@ python -m eval.run_eval                                    # full evaluation (~1
 python -m eval.run_eval --retrieval-only cross-encoder/ms-marco-MiniLM-L-6-v2   # compare retrievers, no LLM
 ```
 
+### With Docker
+
+```bash
+docker build -t rag-demo .                         # downloads the papers and builds the index into the image
+docker run -p 7860:7860 --env-file .env rag-demo   # web UI at localhost:7860
+```
+
+The image uses CPU-only PyTorch (about 3.3 GB in total) and needs only `NVIDIA_API_KEY` at run time.
+
+### Hosted demo limits
+
+Set `DEMO_DAILY_LIMIT` (and optionally `DEMO_SESSION_LIMIT`, default 5) to cap new questions per day and per visitor, so a public deployment cannot use up the API key. Repeated questions are served from a shared cache and the example questions never count. A hosted copy without `data/` and `chroma_db/` downloads the papers and builds the index on first start (about 2 minutes). Local runs are unlimited.
+
 ### Tests
 
 ```bash
 pip install -r requirements-dev.txt
-pytest -q          # 72 unit tests, about 5 s
+pytest -q          # 75 unit tests, about 5 s
 ruff check .
 ```
 
@@ -193,7 +206,7 @@ The tests use small fakes for the tokenizer, embedder, vector store, reranker an
 ingest/    load PDFs, chunk, embed, store (Stage A)
 rag/       two-stage retriever, generator with citation rules, pipeline, CLI (Stage B)
 eval/      test set, metrics, LLM judge, report.md + results.csv (Stage C)
-app/       Streamlit UI
+app/       Streamlit UI and demo usage limits
 scripts/   corpus download
 tests/     offline unit tests (pytest)
 ```

@@ -1,0 +1,12 @@
+# Used by Streamlit Community Cloud, which looks next to the app file first.
+# CPU-only PyTorch: the default build bundles CUDA and is several GB larger.
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch
+pypdf>=4.2
+sentence-transformers>=3.0
+chromadb>=0.5
+tiktoken>=0.7
+tqdm>=4.66
+openai>=1.40
+python-dotenv>=1.0
+streamlit>=1.38
