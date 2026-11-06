@@ -13,6 +13,14 @@ import streamlit as st  # noqa: E402
 from dotenv import load_dotenv  # noqa: E402
 
 load_dotenv(ROOT / ".env")
+# On Streamlit Community Cloud the settings live in st.secrets: copy them into the environment
+# before anything reads them (the limits below, the API key in the generator).
+try:
+    for _name, _value in st.secrets.items():
+        if isinstance(_value, str | int):
+            os.environ.setdefault(_name, str(_value))
+except Exception:  # no secrets file when run locally
+    pass
 
 from app.limits import DailyCounter  # noqa: E402
 from ingest import config  # noqa: E402

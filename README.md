@@ -1,12 +1,14 @@
 # Medical AI Paper QA: an evaluated RAG pipeline
 
 [![CI](https://github.com/salamon30/rag-project/actions/workflows/ci.yml/badge.svg)](https://github.com/salamon30/rag-project/actions/workflows/ci.yml)
+[![Live demo](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://medical-ai-papers.streamlit.app/)
 
 > **At a glance**
 >
 > - **What:** ask questions about a set of PDFs and get answers that cite the exact passage and page, or "I don't know" when the documents do not say.
 > - **Results:** right page in the top 5 rose from 0.45 to 0.90 with a reranker; answer correctness 5.0 / 4.8 / 4.5 (1-5) on the original, hard and held-out test sets; 75 offline unit tests in CI.
 > - **Stack:** Python 3.11 · pypdf · bge-small embeddings · ChromaDB · cross-encoder reranker · NVIDIA NIM (Nemotron) · Streamlit · pytest + GitHub Actions.
+> - **Try it:** [live demo](https://medical-ai-papers.streamlit.app/) (5 questions per visitor, about 30 s per answer; the example questions are instant).
 > - **Run:** `pip install -r requirements.txt`, set `NVIDIA_API_KEY`, then `./scripts/download_data.sh`, `python -m ingest.run --reset` and `streamlit run app/streamlit_app.py` ([full steps](#quickstart)).
 
 Ask questions about medical-AI research papers and get answers that cite the exact passage and page they came from. The system says *"I don't know"* instead of guessing when the retrieved text does not contain the answer.
@@ -186,9 +188,12 @@ docker run -p 7860:7860 --env-file .env rag-demo   # web UI at localhost:7860
 
 The image uses CPU-only PyTorch (about 3.3 GB in total) and needs only `NVIDIA_API_KEY` at run time.
 
-### Hosted demo limits
+### Hosted demo
 
-Set `DEMO_DAILY_LIMIT` (and optionally `DEMO_SESSION_LIMIT`, default 5) to cap new questions per day and per visitor, so a public deployment cannot use up the API key. Repeated questions are served from a shared cache and the example questions never count. A hosted copy without `data/` and `chroma_db/` downloads the papers and builds the index on first start (about 2 minutes). Local runs are unlimited.
+The [live demo](https://medical-ai-papers.streamlit.app/) runs on Streamlit Community Cloud from `main`, so every push redeploys it; `app/requirements.txt` installs CPU-only PyTorch there.
+
+
+Set `DEMO_DAILY_LIMIT` as an environment variable or Streamlit secret (and optionally `DEMO_SESSION_LIMIT`, default 5) to cap new questions per day and per visitor, so a public deployment cannot use up the API key. Repeated questions are served from a shared cache and the example questions never count. A hosted copy without `data/` and `chroma_db/` downloads the papers and builds the index on first start (about 2 minutes). Local runs are unlimited.
 
 ### Tests
 
