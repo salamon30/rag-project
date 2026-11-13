@@ -239,6 +239,8 @@ The image uses CPU-only PyTorch (about 3.3 GB in total) and needs only `NVIDIA_A
 
 The [live demo](https://medical-ai-papers.streamlit.app/) runs on Streamlit Community Cloud from `main`, so every push redeploys it; `app/requirements.txt` installs CPU-only PyTorch there.
 
+Streamlit puts a free app to sleep when nobody visits it. A scheduled GitHub Actions job ([keep-demo-awake.yml](.github/workflows/keep-demo-awake.yml)) opens the demo in a headless browser every 8 hours and presses the wake-up button if needed.
+
 
 Set `DEMO_DAILY_LIMIT` as an environment variable or Streamlit secret (and optionally `DEMO_SESSION_LIMIT`, default 5) to cap new questions per day and per visitor, so a public deployment cannot use up the API key. Repeated questions are served from a shared cache and the example questions never count. A hosted copy without `data/` and `chroma_db/` downloads the papers and builds the index on first start (about 2 minutes). Local runs are unlimited.
 

@@ -1,0 +1,24 @@
+name: Keep demo awake
+
+# Streamlit Community Cloud puts an app to sleep when it has no visitors.
+# This opens the demo in a browser a few times a day so it stays up.
+on:
+  schedule:
+    - cron: "17 */8 * * *"
+  workflow_dispatch:
+
+jobs:
+  visit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Install a headless browser
+        run: |
+          pip install playwright
+          playwright install --with-deps chromium
+      - name: Open the demo and wake it if it sleeps
+        run: python scripts/keep_demo_awake.py
