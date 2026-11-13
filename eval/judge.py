@@ -43,8 +43,14 @@ def _parse(text: str) -> dict:
 
 
 class Judge:
-    def __init__(self, generator: Generator):
-        self.gen = generator  # reuse the same client and model
+    def __init__(self, generator: Generator, model: str | None = None):
+        self.gen = generator  # reuse the same client
+        # Default: the generator's model. Pass another model to get an independent judge.
+        self.model = model or generator.model
+        # Only the Nemotron reasoning models need thinking switched off; other models
+        # do not know this option.
+        self.extra_body = ({"chat_template_kwargs": {"enable_thinking": False}}
+                           if "nemotron" in self.model or self.model == generator.model else None)
 
     def score(self, question, reference, context, answer, retries=2) -> dict:
         prompt = JUDGE_PROMPT.format(question=question, reference=reference,
@@ -53,11 +59,12 @@ class Judge:
         for _ in range(retries + 1):
             try:
                 resp = self.gen.client.chat.completions.create(
-                    model=self.gen.model, temperature=0, max_tokens=1000,
+                    model=self.model, temperature=0, max_tokens=1000,
+                    timeout=120,  # a hung request must not stall a whole evaluation run
                     messages=[{"role": "user", "content": prompt}],
                     # Scoring is a short rubric task. With thinking on, the model spent its
                     # whole token budget on hidden reasoning and returned no JSON.
-                    extra_body={"chat_template_kwargs": {"enable_thinking": False}},
+                    **({"extra_body": self.extra_body} if self.extra_body else {}),
                 )
                 choice = resp.choices[0]
                 if not choice.message.content:

@@ -6,7 +6,7 @@
 > **At a glance**
 >
 > - **What:** ask questions about a set of PDFs and get answers that cite the exact passage and page, or "I don't know" when the documents do not say.
-> - **Results:** right page in the top 5 rose from 0.45 to 0.90 with a reranker; answer correctness 5.0 / 4.8 / 4.5 (1-5) on the original, hard and held-out test sets; 75 offline unit tests in CI.
+> - **Results:** right page in the top 5 rose from 0.45 to 0.90 with a reranker; answer correctness 5.0 / 4.8 / 4.5 (1-5) on the original, hard and held-out test sets, and 4.6 / 4.4 / 4.4 when an independent model from another vendor scores the same answers; 85 offline unit tests in CI.
 > - **Stack:** Python 3.11 · pypdf · bge-small embeddings · ChromaDB · cross-encoder reranker · NVIDIA NIM (Nemotron) · Streamlit · pytest + GitHub Actions.
 > - **Try it:** [live demo](https://medical-ai-papers.streamlit.app/) (5 questions per visitor, about 30 s per answer; the example questions are instant).
 > - **Run:** `pip install -r requirements.txt`, set `NVIDIA_API_KEY`, then `./scripts/download_data.sh`, `python -m ingest.run --reset` and `streamlit run app/streamlit_app.py` ([full steps](#quickstart)).
@@ -61,13 +61,15 @@ Reports: [with reranker](eval/report.md) · [without reranker](eval/report_no_re
 |---|---|---|---|
 | Unanswerable (declined) | 5.0 (6 / 6) | 5.0 (6 / 6) | 5.0 (6 / 6) ✅ |
 | False premise | 2.0 | **5.0** | 4.0 ¹ |
-| Multi-paper | 3.0 | 3.7 | **5.0** |
+| Multi-paper | 3.0 | 3.7 | **5.0** ² |
 | Paraphrase | 5.0 | 5.0 | 5.0 |
 | **All 20** | 3.8 | 4.6 | **4.8** |
 
 Correctness 1-5. Reports: [current](eval/report_hard.md) · [without decomposition](eval/report_hard_no_decompose.md). The original 20 questions score 5.0 in every column.
 
 ¹ One false-premise answer (h08) flipped to a refusal although it received exactly the same five passages as the run before: run-to-run variation of the LLM, not an effect of decomposition.
+
+² Scored by the same-model judge. An independent judge later gave 3.7: two of these six answers contain a wrong number ([Second judge](#second-judge)).
 
 **What the hard set found.**
 1. **The prompt was too strict.** The model refused false-premise questions because the passages did not explain *why ResNet-50 was chosen*. One added rule ("if the passages contradict the question's assumption, correct it with citations") fixed all four without making it answer any unanswerable question.
@@ -97,6 +99,24 @@ Correctness 1-5. Retrieval on the held-out set: hit@5 1.00, page_hit@5 0.94, MRR
     - **A misread number (x15).** The model said MedRAG uses 4 snippets by default; the paper says 32, on a page that was not retrieved.
 3. **The judge missed a wrong number.** Re-scored after its reference was corrected, x15 got 5/5 four times in a row, each time accepting "4 snippets" against a reference of 32. It is scored by hand (3/5) and marked as manual in the report.
 4. **The test set had a bug too.** The x15 reference only gave RAG's training setting (5 or 10 documents). The paper's appendix also reports 15 and 50 documents at test time, which the model had correctly cited. The reference was fixed and the saved answer re-scored without regenerating it.
+
+### Second judge
+
+All scores above come from a judge that is the same model as the generator, which can favour its own answers. To check this, the 60 saved answers were scored again by a model from a different vendor (`minimaxai/minimax-m3.1-flash`). Nothing was regenerated: both judges saw the same question, passages, answer and reference (`python -m eval.rejudge --model ...`).
+
+| Test set | Same-model judge | Independent judge | Same score | Within 1 point |
+|---|---|---|---|---|
+| Original (20) | 5.00 | 4.55 | 60% | 95% |
+| Hard (20) | 4.80 | 4.35 | 75% | 90% |
+| Held-out (20) | 4.50 | 4.35 | 85% | 100% |
+
+Correctness 1-5. [Full comparison](eval/judge_comparison.md) with every disagreement and the second judge's reason.
+
+**What the second judge found.**
+1. **The same-model judge was lenient, never strict.** The independent judge scored 16 of 60 answers lower and none higher. Most gaps are one point for a correct answer that leaves out a detail of the reference.
+2. **It caught two wrong answers that had scored 5/5.** Asked how much higher Medprompt's MedQA accuracy is than Flan-PaLM's, the system answered "13.5"; the reference is 22.6 points (h13, now 1/5). Asked which training set is larger, it reached the right conclusion from an invented figure of about 1,470 CheXNet images instead of 112,120 (h12, now 3/5). Both are multi-paper questions.
+3. **So the hard set's multi-paper score was too high.** With the independent judge it is 3.7, not 5.0, which is in line with the 2.3 on the held-out set: retrieval finds both papers after query decomposition, but combining their numbers still goes wrong.
+4. **The held-out set moved least** (4.50 to 4.35), and its hand-checked multi-paper scores did not change.
 
 ## Architecture
 
@@ -199,7 +219,7 @@ Set `DEMO_DAILY_LIMIT` as an environment variable or Streamlit secret (and optio
 
 ```bash
 pip install -r requirements-dev.txt
-pytest -q          # 75 unit tests, about 5 s
+pytest -q          # 85 unit tests, about 5 s
 ruff check .
 ```
 
@@ -222,7 +242,7 @@ Ten open-access arXiv papers on medical AI and RAG: the original RAG paper, a RA
 
 ## Limitations and next steps
 
-- **Same model as generator and judge.** This can inflate answer scores through self-preference. A different judge model would be more reliable.
+- **Same model as generator and judge in the main reports.** It was lenient: an independent judge scored about 0.15 to 0.45 points lower per set and caught two wrong answers (see [Second judge](#second-judge)). The per-type tables above still show the same-model scores.
 - **Multi-paper questions are the weak spot.** They score 2.3 on the held-out set. Chained questions, where one search depends on another's answer, would need iterative retrieval: search, read, then search again. Adding the neighbouring chunk to each hit could fix boundary cuts like x14.
 - **Small held-out set.** 20 questions, 3 of them multi-paper, so one answer moves a type's average a lot.
 - **The judge is lenient on partial answers and can miss wrong numbers.** It gave 5/5 to a multi-paper answer that covered only one of the two papers (h15), and 5/5 to an answer with a wrong snippet count (x15). Answer scores are spot-checked by hand, and refusals are scored by rule rather than by the judge.
