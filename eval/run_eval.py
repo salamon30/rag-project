@@ -23,6 +23,7 @@ load_dotenv()
 
 from ingest import config  # noqa: E402
 from rag.decompose import Decomposer  # noqa: E402
+from rag.followup import answer_with_followup  # noqa: E402
 from rag.generator import Generator, build_context  # noqa: E402
 from rag.retriever import Retriever  # noqa: E402
 
@@ -123,12 +124,14 @@ def evaluate(k: int, rerank_model: str, testset: str, decompose: bool = False):
     rows = []
     for t in tests:
         hits, queries = search(retriever, decomposer, t["question"], max(k, MRR_DEPTH))
-        top = hits[:k]
+        top = hits[: retriever.context_size(k)]
+        followup = None
         m = rank_metrics(hits, t["expected_pages"], k) if answerable(t) else dict.fromkeys(
             ["hit@1", f"hit@{k}", f"all_sources@{k}", f"page_hit@{k}", "rr", "first_rank"])
 
         try:
-            answer = with_retry(lambda t=t, top=top: gen.answer(t["question"], top))
+            answer, top, followup = with_retry(lambda t=t, top=top: answer_with_followup(
+                t["question"], top, retriever, gen, config.FOLLOWUP_K, config.FOLLOWUP))
             j = judge.score(t["question"], t["reference_answer"], build_context(top), answer)
             said_dont_know = apply_refusal_rules(t, answer, j)
         except Exception as e:  # one bad call should not lose the whole run
@@ -137,6 +140,7 @@ def evaluate(k: int, rerank_model: str, testset: str, decompose: bool = False):
                  "faithfulness_reason": "not judged: generation failed", "correctness_reason": ""}
         rows.append({
             "id": t["id"], "type": t["type"], "question": t["question"], "queries": " || ".join(queries),
+            "followup": followup or "",
             "expected": "; ".join(f"{s}:p{' '.join(map(str, p))}" for s, p in t["expected_pages"].items()),
             **{key: m[key] for key in ("hit@1", f"hit@{k}", f"all_sources@{k}", f"page_hit@{k}")},
             "rr": round(m["rr"], 3) if m["rr"] is not None else None,
@@ -148,7 +152,7 @@ def evaluate(k: int, rerank_model: str, testset: str, decompose: bool = False):
             "answer": answer, "reference_answer": t["reference_answer"],
         })
         print(f"{t['id']} {t['type']:<13} rank={m['first_rank'] or '-':>2}  F={j['faithfulness']}  C={j['correctness']}"
-              f"  searches={len(queries)}")
+              f"  searches={len(queries)}{'  +follow-up' if followup else ''}  passages={len(top)}")
     return rows
 
 
@@ -297,7 +301,7 @@ def load_results(suffix):
                 return float(v)
             except ValueError:
                 return v
-    text_cols = {"id", "type", "question", "queries", "expected", "retrieved", "answer", "reference_answer",
+    text_cols = {"id", "type", "question", "queries", "followup", "expected", "retrieved", "answer", "reference_answer",
                  "faithfulness_reason", "correctness_reason"}
     with open(EVAL_DIR / f"results{suffix}.csv", newline="") as f:
         return [{c: (v if c in text_cols else num(v)) for c, v in row.items()} for row in csv.DictReader(f)]
@@ -340,9 +344,13 @@ def main():
                     help="re-apply scoring rules to eval/results{SUFFIX}.csv without LLM calls")
     ap.add_argument("--testset", default="testset",
                     help="file name in eval/ without .jsonl, e.g. testset_hard")
+    ap.add_argument("--out-suffix", metavar="SUFFIX",
+                    help="write results{SUFFIX}.csv and report{SUFFIX}.md instead of the name taken from --testset")
     args = ap.parse_args()
     k = args.k
     suffix = args.testset.removeprefix("testset")  # testset_hard -> report_hard.md
+    if args.out_suffix is not None:
+        suffix = args.out_suffix
 
     if args.rescore is not None:
         rows = load_results(args.rescore)

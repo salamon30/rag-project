@@ -11,9 +11,10 @@ SYSTEM_PROMPT = """You answer questions about a collection of research papers.
 Rules:
 - Use ONLY the numbered context passages. Do not use outside knowledge.
 - Cite every claim with the passage number in square brackets, e.g. [2] or [1][3].
+- For a comparison or a calculation, first state each figure with its citation, then give the result. Never estimate or derive a figure that the passages do not state: say which figure is missing instead.
 - If the question assumes something the passages contradict (a wrong name, number or method), do not refuse: say the assumption is wrong and give the correct fact with citations.
 - If the passages neither answer the question nor contradict it, reply exactly: "I don't know based on the provided documents."
-- Be concise."""
+- Be concise, but answer in at least one full sentence. Never reply with only a number or a name."""
 
 
 def build_context(hits: list[Hit]) -> str:

@@ -25,6 +25,25 @@ class Hit:
     score: float                       # final ranking score (rerank score if reranked)
     vector_score: float | None = None  # cosine similarity from stage 1
     vector_rank: int | None = None     # 1-based rank before reranking
+    chunk_id: str | None = None        # "<source>::p<page>::c<index>", used to find the next chunk
+
+
+def next_chunk_ids(chunk_id: str) -> list[str]:
+    """Ids where the text after this chunk can start: next chunk on the page, else next page."""
+    try:
+        source, page, index = chunk_id.rsplit("::", 2)
+        page, index = int(page[1:]), int(index[1:])
+    except (ValueError, AttributeError):
+        return []
+    return [f"{source}::p{page}::c{index + 1}", f"{source}::p{page + 1}::c0"]
+
+
+def continuation(text: str, following: str, limit: int) -> str:
+    """The part of `following` that comes after `text`, without the overlap they share."""
+    for n in range(min(len(text), len(following)), 0, -1):
+        if text.endswith(following[:n]):
+            return following[n:n + limit]
+    return following[:limit]
 
 
 def _enabled(name) -> bool:
@@ -64,12 +83,36 @@ class Retriever:
     def vector_search(self, question: str, n: int) -> list[Hit]:
         q = self.model.encode([config.QUERY_PREFIX + question], normalize_embeddings=True).tolist()
         res = self.collection.query(query_embeddings=q, n_results=n)
+        ids = (res.get("ids") or [[None] * len(res["documents"][0])])[0]
         return [
             Hit(text=doc, source=md["source"], page=md["page"], score=1 - dist,
-                vector_score=1 - dist, vector_rank=i)
-            for i, (doc, md, dist) in enumerate(
-                zip(res["documents"][0], res["metadatas"][0], res["distances"][0], strict=True), start=1)
+                vector_score=1 - dist, vector_rank=i, chunk_id=cid)
+            for i, (doc, md, dist, cid) in enumerate(
+                zip(res["documents"][0], res["metadatas"][0], res["distances"][0], ids, strict=True), start=1)
         ]
+
+    def context_size(self, k: int, multi_k: int = config.MULTI_QUERY_K) -> int:
+        """Passages the generator reads: k, or more when the last question was split."""
+        return max(k, multi_k) if getattr(self, "last_split", False) else k
+
+    def add_neighbours(self, hits: list[Hit], limit: int = config.NEIGHBOR_CHARS) -> list[Hit]:
+        """Extend each hit with the start of the text that follows it in the paper.
+
+        A fact is sometimes one sentence past the end of the chunk that matched. The
+        following chunk has it, but ranks lower on its own. Ranking is not changed."""
+        wanted = {h.chunk_id: next_chunk_ids(h.chunk_id) for h in hits if h.chunk_id}
+        ids = sorted({i for cand in wanted.values() for i in cand})
+        if limit <= 0 or not ids:
+            return hits
+        got = self.collection.get(ids=ids)
+        texts = dict(zip(got["ids"], got["documents"], strict=True))
+        for h in hits:
+            following = next((texts[i] for i in wanted.get(h.chunk_id, []) if i in texts), None)
+            if following:
+                more = continuation(h.text, following, limit)
+                if more.strip():
+                    h.text = f"{h.text} {more.strip()} […]"
+        return hits
 
     def search(self, question: str, k: int = config.TOP_K,
                candidates: int = config.RERANK_CANDIDATES) -> list[Hit]:
@@ -83,16 +126,22 @@ class Retriever:
         return diversify(sorted(hits, key=lambda h: h.score, reverse=True), k, self.max_per_source)
 
     def search_many(self, queries: list[str], k: int = config.TOP_K,
-                    candidates: int = config.RERANK_CANDIDATES, question: str | None = None) -> list[Hit]:
-        """Search once per sub-query and interleave, so each item gets a share of the top k.
+                    candidates: int = config.RERANK_CANDIDATES, question: str | None = None,
+                    multi_k: int = config.MULTI_QUERY_K) -> list[Hit]:
+        """Search once per sub-query and interleave, so each item gets a share of the context.
 
         A split is kept only if the sub-queries' top hits come from at least two papers.
         Otherwise it was a split into aspects of one paper, which only takes slots away
-        from the best passages, so the original question is searched instead."""
+        from the best passages, so the original question is searched instead.
+
+        A kept split returns max(k, multi_k) hits and sets `last_split`; `context_size(k)`
+        then says how many of the hits the generator should read."""
+        self.last_split = False
         if len(queries) > 1:
             results = [self.search(q, k, candidates) for q in queries]
             if len({r[0].source for r in results if r}) >= 2:
                 self.last_searches = list(queries)
-                return interleave(results, k)
+                self.last_split = True
+                return self.add_neighbours(interleave(results, max(k, multi_k)))
         self.last_searches = [question or queries[0]]
-        return self.search(self.last_searches[0], k, candidates)
+        return self.add_neighbours(self.search(self.last_searches[0], k, candidates))

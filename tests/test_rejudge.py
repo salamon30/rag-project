@@ -19,6 +19,9 @@ class FakeRetriever:
         self.calls.append((queries, question))
         return self.hits
 
+    def context_size(self, k):
+        return k
+
 
 def hit(source, page):
     return Hit(text=f"text of {source} p{page}", source=source, page=page, score=1.0)

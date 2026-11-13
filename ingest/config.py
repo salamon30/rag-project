@@ -29,6 +29,19 @@ RERANK_CANDIDATES = 50
 # Hard set: multi-paper correctness 3.7 -> 5.0, original set unchanged at 5.0. DECOMPOSE=0 turns it off.
 DECOMPOSE = os.getenv("DECOMPOSE", "1") == "1"
 MAX_PER_SOURCE = int(os.getenv("MAX_PER_SOURCE", "0"))
+# A kept split shares the context between papers: with k = 5, each of two papers got
+# only two or three passages and the page with the figure was often not among them.
+# So a split question gets this many passages in total instead of TOP_K.
+MULTI_QUERY_K = int(os.getenv("MULTI_QUERY_K", "8"))
+# Chunks end where the token window ends, often mid-sentence. Each hit is extended with
+# the start of the chunk that follows it in the paper (this many characters; 0 = off).
+NEIGHBOR_CHARS = int(os.getenv("NEIGHBOR_CHARS", "600"))
+# When the first answer is a refusal, let the LLM propose one more search from what the
+# passages revealed (for chained questions), then answer again. Measured and left off:
+# in 70 questions it ran 8 times, 7 of them on unanswerable questions (refusal kept, two
+# extra LLM calls each) and once on a chained question that it did not fix. FOLLOWUP=1 turns it on.
+FOLLOWUP = os.getenv("FOLLOWUP", "0") == "1"
+FOLLOWUP_K = 3
 # Thinking on gives better grounded answers and keeps [n] citations (eval showed
 # thinking-off answers dropped citations and misread context). Reasoning can still
 # exhaust the budget, so the generator falls back to thinking-off once if needed.

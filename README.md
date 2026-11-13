@@ -6,7 +6,7 @@
 > **At a glance**
 >
 > - **What:** ask questions about a set of PDFs and get answers that cite the exact passage and page, or "I don't know" when the documents do not say.
-> - **Results:** right page in the top 5 rose from 0.45 to 0.90 with a reranker; answer correctness 5.0 / 4.8 / 4.5 (1-5) on the original, hard and held-out test sets, and 4.6 / 4.4 / 4.4 when an independent model from another vendor scores the same answers; 85 offline unit tests in CI.
+> - **Results:** right page in the top 5 rose from 0.45 to 0.90 with a reranker; answer correctness 5.0 / 4.8 / 4.5 (1-5) on the original, hard and held-out test sets, and 4.6 / 4.4 / 4.4 when an independent model from another vendor scores the same answers (4.8 / 4.8 / 4.4 after a later round on multi-paper questions); 98 offline unit tests in CI.
 > - **Stack:** Python 3.11 · pypdf · bge-small embeddings · ChromaDB · cross-encoder reranker · NVIDIA NIM (Nemotron) · Streamlit · pytest + GitHub Actions.
 > - **Try it:** [live demo](https://medical-ai-papers.streamlit.app/) (5 questions per visitor, about 30 s per answer; the example questions are instant).
 > - **Run:** `pip install -r requirements.txt`, set `NVIDIA_API_KEY`, then `./scripts/download_data.sh`, `python -m ingest.run --reset` and `streamlit run app/streamlit_app.py` ([full steps](#quickstart)).
@@ -118,6 +118,33 @@ Correctness 1-5. [Full comparison](eval/judge_comparison.md) with every disagree
 3. **So the hard set's multi-paper score was too high.** With the independent judge it is 3.7, not 5.0, which is in line with the 2.3 on the held-out set: retrieval finds both papers after query decomposition, but combining their numbers still goes wrong.
 4. **The held-out set moved least** (4.50 to 4.35), and its hand-checked multi-paper scores did not change.
 
+### Multi-paper round
+
+Multi-paper questions were the weak spot in both earlier sets, so one more round targeted them. To keep the measurement clean, [10 new multi-paper questions](eval/testset_multi.jsonl) were written first and the unchanged system was run on them. Then four changes were made, developed only on the multi-paper questions of the older sets:
+
+- **More passages for a split question.** When a question is split into one search per paper, the generator reads 8 passages instead of 5, so each paper is not limited to two or three.
+- **The text after each hit.** Every passage is extended with the first 600 characters of the chunk that follows it in the paper. This fixed the comparison that had been cut off one sentence before the batch size (x14).
+- **A rule for figures.** State each figure with its citation, then compute; never derive a figure the passages do not state. This fixed the two wrong numbers the independent judge had found (h12, h13).
+- **A follow-up search after a refusal**, for chained questions. Measured and left off (below).
+
+Correctness 1-5 from the independent judge, same-model judge in brackets:
+
+| Test set | Before | After |
+|---|---|---|
+| New multi-paper questions (10), never tuned on | 3.4 (3.8) | **3.6** (4.0) |
+| Original (20) | 4.55 (5.00) | 4.75 (4.95) |
+| Hard (20) | 4.35 (4.80) | 4.75 (5.00) |
+| Held-out (20) | 4.35 (4.50) | 4.35 (5.00) |
+
+Reports: new set [before](eval/report_multi_before.md) · [after](eval/report_multi.md) · [judge comparison after](eval/judge_comparison_r2.md) · [before](eval/judge_multi_before.md).
+
+**What this round found.**
+1. **The gain on unseen questions is small: 3.4 to 3.6.** On the older sets the same changes look much better (multi-paper 3.7 to 4.7 on the hard set, 2.3 to 3.7 on the held-out set), but those are the questions the changes were developed on. The new set is the honest number.
+2. **The remaining failures are retrieval, not reading.** In the new set the page that states the figure is missing in most wrong answers: the U-Net training page (y03), the Med-PaLM abstract with 67.6% (y07, answered 19.3 from a table that lists 67.2%), the page that defines MultiMedQA (y06). The sub-query finds the right paper but not the right page. More passages did not fix that; a better per-paper search would.
+3. **The follow-up search did not earn its cost.** It ran 8 times in 70 questions: 7 times on unanswerable questions, where the refusal was correctly kept at the price of two extra LLM calls, and once on a chained question (y04) that it did not solve. On a development run it also replaced an honest "this figure is missing" with wrong numbers. It stays in the code behind `FOLLOWUP=1`.
+4. **Single-paper questions on the held-out set went down** (4.6 to 4.2 with the independent judge; four answers lost one or two points, and in one of them, x09, the judge flagged figures that do not match the paper). This may be a cost of the longer passages or run-to-run variation; the two were not separated here. No other question type got worse.
+5. **Some answers are still a bare number** ("19.3"), despite a prompt rule that asks for a full sentence with citations.
+
 ## Architecture
 
 ![Animated pipeline: ingestion runs once; each question is decomposed, embedded, searched in ChromaDB, reranked to the top 5 chunks and answered by the LLM with citations](docs/architecture.svg)
@@ -219,7 +246,7 @@ Set `DEMO_DAILY_LIMIT` as an environment variable or Streamlit secret (and optio
 
 ```bash
 pip install -r requirements-dev.txt
-pytest -q          # 85 unit tests, about 5 s
+pytest -q          # 98 unit tests, about 5 s
 ruff check .
 ```
 
@@ -243,7 +270,7 @@ Ten open-access arXiv papers on medical AI and RAG: the original RAG paper, a RA
 ## Limitations and next steps
 
 - **Same model as generator and judge in the main reports.** It was lenient: an independent judge scored about 0.15 to 0.45 points lower per set and caught two wrong answers (see [Second judge](#second-judge)). The per-type tables above still show the same-model scores.
-- **Multi-paper questions are the weak spot.** They score 2.3 on the held-out set. Chained questions, where one search depends on another's answer, would need iterative retrieval: search, read, then search again. Adding the neighbouring chunk to each hit could fix boundary cuts like x14.
+- **Multi-paper questions are the weak spot.** They score 3.6 on 10 unseen questions after the [multi-paper round](#multi-paper-round) (2.3 on the held-out set before it). The open problem is finding the right page inside each paper; chained questions, where one search depends on another's answer, are also still unsolved (the follow-up search did not fix them).
 - **Small held-out set.** 20 questions, 3 of them multi-paper, so one answer moves a type's average a lot.
 - **The judge is lenient on partial answers and can miss wrong numbers.** It gave 5/5 to a multi-paper answer that covered only one of the two papers (h15), and 5/5 to an answer with a wrong snippet count (x15). Answer scores are spot-checked by hand, and refusals are scored by rule rather than by the judge.
 - **Run-to-run variation.** LLM answers and decomposition can differ between identical runs; single-question changes should be checked against the retrieved passages before they are attributed to a code change.

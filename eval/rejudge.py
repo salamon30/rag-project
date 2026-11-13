@@ -16,13 +16,16 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from ingest import config  # noqa: E402
+from rag.followup import merge  # noqa: E402
 from rag.generator import Generator, build_context  # noqa: E402
 from rag.retriever import Retriever  # noqa: E402
 
 from .judge import Judge  # noqa: E402
 from .run_eval import EVAL_DIR, MRR_DEPTH, apply_refusal_rules, fmt, load_results, mean  # noqa: E402
 
-SET_NAMES = {"": "Original", "_hard": "Hard", "_heldout": "Held-out"}
+SET_NAMES = {"": "Original", "_hard": "Hard", "_heldout": "Held-out",
+             "_multi_before": "New multi-paper (before)", "_multi": "New multi-paper (after)",
+             "_r2": "Original (after)", "_hard_r2": "Hard (after)", "_heldout_r2": "Held-out (after)"}
 
 
 def as_test(row):
@@ -33,7 +36,10 @@ def as_test(row):
 def replay_context(retriever, row, k):
     """Fetch the passages again with the saved queries. Returns (context, same_pages)."""
     queries = [q for q in row["queries"].split(" || ") if q] or [row["question"]]
-    top = retriever.search_many(queries, max(k, MRR_DEPTH), question=row["question"])[:k]
+    hits = retriever.search_many(queries, max(k, MRR_DEPTH), question=row["question"])
+    top = hits[: retriever.context_size(k)]
+    if row.get("followup"):  # the answer also read the passages of its follow-up search
+        top = merge(top, retriever.add_neighbours(retriever.search(row["followup"], config.FOLLOWUP_K)))
     pages = "; ".join(f"{h.source}:p{h.page}" for h in top)
     return build_context(top), pages == row["retrieved"]
 
@@ -98,7 +104,7 @@ def write_csv(rows, suffix):
         w.writerows(rows)
 
 
-def write_comparison(results, first_model, second_model):
+def write_comparison(results, first_model, second_model, name="judge_comparison"):
     lines = [
         "# Judge comparison", "",
         f"Date: {date.today()}  ",
@@ -134,7 +140,7 @@ def write_comparison(results, first_model, second_model):
                 lines.append(f"| {SET_NAMES.get(suffix, suffix)} | {r['id']} | {r['type']} | {a} | {b} | {reason} |")
     if not n:
         lines.append("| – | – | – | – | – | no disagreements |")
-    (EVAL_DIR / "judge_comparison.md").write_text("\n".join(lines) + "\n")
+    (EVAL_DIR / f"{name}.md").write_text("\n".join(lines) + "\n")
 
 
 def main():
@@ -143,6 +149,7 @@ def main():
     ap.add_argument("--sets", nargs="*", default=["", "_hard", "_heldout"],
                     help="results file suffixes: '' (original), _hard, _heldout")
     ap.add_argument("--k", type=int, default=config.TOP_K)
+    ap.add_argument("--report", default="judge_comparison", help="name of the report file in eval/, without .md")
     ap.add_argument("--retry-missing", action="store_true",
                     help="keep the scores in eval/rejudge*.csv and only repeat calls that failed")
     args = ap.parse_args()
@@ -155,8 +162,8 @@ def main():
         keep = load_rejudged(suffix) if args.retry_missing else None
         results[suffix] = rejudge(load_results(suffix), retriever, judge, args.k, keep)
         write_csv(results[suffix], suffix)
-    write_comparison(results, gen.model, args.model)
-    print(f"\nWrote {EVAL_DIR / 'judge_comparison.md'}")
+    write_comparison(results, gen.model, args.model, args.report)
+    print(f"\nWrote {EVAL_DIR / f'{args.report}.md'}")
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 import numpy as np
 
 from ingest import config
-from rag.retriever import Retriever, _enabled
+from rag.retriever import Hit, Retriever, _enabled, continuation, next_chunk_ids
 
 
 class FakeEmbedder:
@@ -145,8 +145,64 @@ def test_search_many_keeps_split_across_papers():
         return orig_search(q, k, candidates)
 
     r.search = search
-    hits = r.search_many(["about a", "about b"], k=4, question="original")
+    hits = r.search_many(["about a", "about b"], k=4, question="original", multi_k=4)
     assert [h.source for h in hits] == ["a.pdf", "b.pdf", "a.pdf", "b.pdf"]
+    assert r.last_split
+
+
+def test_kept_split_reads_more_passages_than_a_single_search():
+    r = make()
+    col = TwoPaperCollection()
+    r.collection = col
+    sources = iter(["a", "b"])
+    orig_search = r.search
+
+    def search(q, k, candidates=50):
+        col.next_source = next(sources)
+        return orig_search(q, k, candidates)
+
+    r.search = search
+    hits = r.search_many(["about a", "about b"], k=4, question="original", multi_k=6)
+    assert len(hits) == 6 and r.context_size(4, multi_k=6) == 6
+    r.search = orig_search
+    r.search_many(["one question"], k=4)
+    assert r.context_size(4, multi_k=6) == 4
+
+
+def test_next_chunk_ids_point_to_same_page_then_next_page():
+    assert next_chunk_ids("a.pdf::p3::c1") == ["a.pdf::p3::c2", "a.pdf::p4::c0"]
+    assert next_chunk_ids(None) == [] and next_chunk_ids("broken") == []
+
+
+def test_continuation_removes_the_overlap():
+    assert continuation("We train with Adam", "with Adam and a batch of 16.", 100) == " and a batch of 16."
+    assert continuation("no overlap here", "Fresh text.", 5) == "Fresh"
+
+
+class NeighbourCollection:
+    def __init__(self, docs):
+        self.docs = docs
+
+    def get(self, ids):
+        found = [i for i in ids if i in self.docs]
+        return {"ids": found, "documents": [self.docs[i] for i in found]}
+
+
+def test_add_neighbours_appends_the_following_text():
+    r = make()
+    r.collection = NeighbourCollection({"a.pdf::p2::c1": "We train with a batch of 16."})
+    hits = [Hit("Setup. We train", "a.pdf", 2, 1.0, chunk_id="a.pdf::p2::c0"),
+            Hit("Last chunk of the paper", "a.pdf", 9, 1.0, chunk_id="a.pdf::p9::c0"),
+            Hit("No id", "b.pdf", 1, 1.0)]
+    out = r.add_neighbours(hits, limit=100)
+    assert out[0].text == "Setup. We train with a batch of 16. […]"
+    assert out[1].text == "Last chunk of the paper" and out[2].text == "No id"
+
+
+def test_add_neighbours_can_be_switched_off():
+    r = make()
+    r.collection = NeighbourCollection({"a.pdf::p2::c1": "more"})
+    assert r.add_neighbours([Hit("text", "a.pdf", 2, 1.0, chunk_id="a.pdf::p2::c0")], limit=0)[0].text == "text"
 
 
 def test_last_searches_records_what_really_ran():
